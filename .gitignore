@@ -1,11 +1,30 @@
 # macOS System Files
 .DS_Store
 
-# Planning & Strategy (Local Only)
-.continue/
-.planning/
+# Swift Package Manager (SPM)
+# The build cache directory when compiling via CLI or Xcode
+.build/
+.swiftpm/xcode/package.xcworkspace/
+.swiftpm/configuration/
+# build artifacts
+build/
+DerivedData/
+*.moved-aside
+*.ipa
+*.dSYM.zip
+*.dSYM
 
 # Xcode User Data
 *.xcuserdata/
 xcuserdata/
 DerivedData/
+
+# Planning & Strategy (Local Only)
+.continue/
+.planning/
+
+# Private Files
+*.env
+*.env.local
+*.p12
+*.mobileprovision
