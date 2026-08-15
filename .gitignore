@@ -22,6 +22,7 @@ DerivedData/
 # Planning & Strategy (Local Only)
 .continue/
 .planning/
+.github/instructions/local-*.md
 
 # Private Files
 *.env
