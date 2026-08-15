@@ -1,0 +1,11 @@
+# macOS System Files
+.DS_Store
+
+# Planning & Strategy (Local Only)
+.continue/
+.planning/
+
+# Xcode User Data
+*.xcuserdata/
+xcuserdata/
+DerivedData/
