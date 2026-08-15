@@ -37,6 +37,9 @@ extension TireData: Hashable where T: Hashable {}
 /// A normalized packet format that the UI, charts, and coaching engines understand.
 /// This decouples the rest of the app from game-specific binary layouts.
 public protocol TelemetryPacket: Sendable {
+    // Vehicle Identificaiton
+    var carCode: Int32? { get }
+
     // 1. Magic & Motion Vectors (0x000 - 0x03B)
     var position: SIMD3<Float> { get }
     var velocity: SIMD3<Float> { get }

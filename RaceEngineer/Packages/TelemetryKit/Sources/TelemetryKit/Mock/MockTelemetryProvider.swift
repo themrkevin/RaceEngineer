@@ -61,6 +61,9 @@ public actor MockTelemetryProvider: TelemetryProvider {
 // MARK: - Mock Packet Implementation
 
 public struct MockPacket: TelemetryPacket, Sendable {
+    // Vehicle Identification
+    public var carCode: Int32? = 12345
+
     // 1. Magic & Motion Vectors
     public var position = SIMD3<Float>(0, 0, 0)
     public var velocity = SIMD3<Float>(0, 0, 0)
@@ -116,6 +119,7 @@ public struct MockPacket: TelemetryPacket, Sendable {
     public var debugDescription: String { "MockPacket(\(Int(speedMph)) MPH)" }
 
     public init(
+        carCode: Int32? = 12345,
         speedKmh: Float,
         engineRPM: Float,
         throttle: Float,
@@ -123,6 +127,7 @@ public struct MockPacket: TelemetryPacket, Sendable {
         clutch: Float,
         steeringAngle: Float = 0.0
     ) {
+        self.carCode = carCode
         self.speedKmh = speedKmh
         self.engineRPM = engineRPM
         self.throttle = throttle

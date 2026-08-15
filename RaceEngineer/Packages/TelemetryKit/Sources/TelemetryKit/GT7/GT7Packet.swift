@@ -8,6 +8,12 @@ public struct GT7Packet: TelemetryPacket, Sendable {
         self.data = decryptedData
     }
     
+    // MARK: - Vehicle Identification
+    public var carCode: Int32? {
+        let id = data.readInt32(at: 0x124)
+        return (id > 0) ? id : nil
+    }
+
     // MARK: - 1. Magic & Motion Vectors (0x000 - 0x03B)
     public var magic: UInt32 { data.readUInt32(at: 0x00) }
     public var position: SIMD3<Float> {
@@ -69,18 +75,36 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public var transmissionRPM: Float { data.readFloat(at: 0x09C) }
     public var turboBoost: Float { data.readFloat(at: 0x0A0) }
     
-    // MARK: - 5. Timing, Laps & Session Metadata (0x0A4 - 0x127)
+    // MARK: - 5. Timing, Laps & Session Metadata
+    public var currentLapNumber: Int {
+        let lap = Int(data.readInt16(at: 0x74))
+        return (lap > 0 && lap < 1000) ? lap : 0
+    }
+    
+    public var totalLaps: Int {
+        let total = Int(data.readInt16(at: 0x76))
+        return (total > 0 && total < 1000) ? total : 0
+    }
+    
     public var bestLapTime: TimeInterval? {
-        let millis = data.readInt32(at: 0x0A4)
+        let millis = data.readInt32(at: 0x78)
         return (millis > 0 && millis != -1) ? TimeInterval(millis) / 1000.0 : nil
     }
+    
     public var lastLapTime: TimeInterval? {
-        let millis = data.readInt32(at: 0x0A8)
+        let millis = data.readInt32(at: 0x7C)
         return (millis > 0 && millis != -1) ? TimeInterval(millis) / 1000.0 : nil
     }
-    public var currentLapNumber: Int { Int(data.readInt32(at: 0x0AC)) }
-    public var racePosition: Int { Int(data.readInt16(at: 0x0B6)) }
-    public var totalCars: Int { Int(data.readInt16(at: 0x0B8)) }
+    
+    public var racePosition: Int { 
+        let pos = Int(data.readInt16(at: 0x8C))
+        return max(0, pos)
+    }
+    
+    public var totalCars: Int { 
+        let cars = Int(data.readInt16(at: 0x8E))
+        return max(0, cars)
+    }
     
     // MARK: - 6. Extended Dynamics & Tuning Channels (0x128 - 0x170)
     public var steeringAngle: Float { data.readFloat(at: 0x128) }
