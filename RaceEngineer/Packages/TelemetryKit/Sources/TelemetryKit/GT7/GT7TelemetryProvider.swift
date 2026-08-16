@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import OSLog
+import os
 
 /// Handles the UDP connection to GT7 matching the Packet C (368-byte) specification.
 public actor GT7TelemetryProvider: TelemetryProvider {
@@ -16,7 +17,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
     private var listener: NWListener?
     private var activeInboundConnection: NWConnection?
     private var heartbeatTask: Task<Void, Never>?
-    private var hasLoggedFirstPacket = false
+    private let hasLoggedFirstPacket = OSAllocatedUnfairLock(initialState: false)
 
     private var streamContinuation: AsyncStream<TelemetryPacket>.Continuation?
     private let telemetryStreamInstance: AsyncStream<TelemetryPacket>
@@ -36,7 +37,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
 
     public func start(ipAddress: String) async throws {
         stop()
-        hasLoggedFirstPacket = false
+        hasLoggedFirstPacket.withLock { $0 = false }
 
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
@@ -90,21 +91,39 @@ public actor GT7TelemetryProvider: TelemetryProvider {
 
         logger.info("📡 Inbound data connection established from \(connection.endpoint.debugDescription)")
         connection.start(queue: networkQueue)
-        listenNextPacket(on: connection)
+
+        guard let continuation = self.streamContinuation else { return }
+        let logger = self.logger
+        let firstPacketLock = self.hasLoggedFirstPacket
+
+        Self.listenNextPacket(
+            on: connection,
+            continuation: continuation,
+            logger: logger,
+            firstPacketLock: firstPacketLock
+        )
     }
 
-    private func listenNextPacket(on connection: NWConnection) {
-        connection.receiveMessage { [weak self] content, _, _, error in
-            guard let self else { return }
-
+    private nonisolated static func listenNextPacket(
+        on connection: NWConnection,
+        continuation: AsyncStream<TelemetryPacket>.Continuation,
+        logger: Logger,
+        firstPacketLock: OSAllocatedUnfairLock<Bool>
+    ) {
+        connection.receiveMessage { content, _, _, error in
             // Re-arm immediately for the next packet on the network queue
             if error == nil {
-                self.listenNextPacket(on: connection)
+                listenNextPacket(
+                    on: connection,
+                    continuation: continuation,
+                    logger: logger,
+                    firstPacketLock: firstPacketLock
+                )
             }
 
             guard let data = content, data.count == 368 else {
                 if let error {
-                    self.logger.debug("📥 Receive error: \(error.localizedDescription)")
+                    logger.debug("📥 Receive error: \(error.localizedDescription)")
                 }
                 return
             }
@@ -114,11 +133,18 @@ public actor GT7TelemetryProvider: TelemetryProvider {
             let packet = GT7Packet(decryptedData: decrypted)
 
             if packet.magic == TelemetryConfig.expectedMagic {
-                self.streamContinuation?.yield(packet)
+                continuation.yield(packet)
                 
-                if !self.hasLoggedFirstPacket {
-                    self.hasLoggedFirstPacket = true
-                    self.logger.info("✅ First valid GT7 Packet C telemetry frame streaming at 60Hz")
+                let shouldLog = firstPacketLock.withLock { isLogged -> Bool in
+                    if !isLogged {
+                        isLogged = true
+                        return true
+                    }
+                    return false
+                }
+                
+                if shouldLog {
+                    logger.info("✅ First valid GT7 Packet C telemetry frame streaming at 60Hz")
                 }
             }
         }
@@ -128,8 +154,9 @@ public actor GT7TelemetryProvider: TelemetryProvider {
 
     private func startHeartbeat(ipAddress: String) {
         let host = NWEndpoint.Host(ipAddress)
+        let logger = self.logger
         
-        heartbeatTask = Task.detached(priority: .userInitiated) { [weak self] in
+        heartbeatTask = Task.detached(priority: .userInitiated) {
             let connection = NWConnection(host: host, port: TelemetryConfig.outboundPort, using: .udp)
             connection.start(queue: .global(qos: .userInitiated))
 
@@ -138,7 +165,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
             while !Task.isCancelled {
                 connection.send(content: payload, completion: .contentProcessed({ error in
                     if let error {
-                        print("[Heartbeat] Send error: \(error.localizedDescription)")
+                        logger.error("❌ [Heartbeat] Send error: \(error.localizedDescription)")
                     }
                 }))
 
