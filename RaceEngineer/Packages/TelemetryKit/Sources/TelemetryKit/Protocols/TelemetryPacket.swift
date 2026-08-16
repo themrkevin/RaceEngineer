@@ -88,8 +88,6 @@ public protocol TelemetryPacket: Sendable {
     var surfaceType: TireData<Character> { get } // 'T' = Tarmac, 'C' = Curb, 'D' = Dirt/Grass
     var currentLapTime: TimeInterval? { get }
     var wheelbase: Float { get }
-    
-    // Legacy support (to be removed once fully migrated)
     var oilTemp: Float { get }
     var waterTemp: Float { get }
     

@@ -8,7 +8,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         static let inboundPort: NWEndpoint.Port = 33740 
         static let outboundPort: NWEndpoint.Port = 33739 
         static let heartbeatMessage: [UInt8] = [0x43]   // ASCII 'C'
-        static let heartbeatInterval: UInt64 = 1        
+        static let heartbeatInterval: UInt64 = 10        
         static let expectedMagic: UInt32 = 0x47375330   // "0S7G" / "G7S0"
     }
 
