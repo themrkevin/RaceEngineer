@@ -1,0 +1,50 @@
+# fastlane/Fastfile
+default_platform(:ios)
+
+# Helper: Detect host CPU architecture (x86_64 or arm64) dynamically
+def host_arch
+  RUBY_PLATFORM.include?("arm64") ? "arm64" : "x86_64"
+end
+
+platform :ios do
+  desc "Run tests for a specific Swift Package or all packages natively on macOS"
+  lane :test_package do |options|
+    package_name = options[:name]
+    packages_dir = File.expand_path("../RaceEngineer/Packages", __dir__)
+
+    if package_name
+      # Test a single specified package
+      package_path = File.join(packages_dir, package_name)
+      UI.user_error!("Package '#{package_name}' not found at #{package_path}") unless Dir.exist?(package_path)
+
+      UI.header("Testing Package: #{package_name}")
+      sh("cd '#{package_path}' && xcodebuild test -scheme '#{package_name}' -destination 'platform=macOS,arch=#{host_arch}'")
+    else
+      # Discover and test all local packages under Packages/
+      discovered_packages = Dir.children(packages_dir).select do |entry|
+        File.exist?(File.join(packages_dir, entry, "Package.swift"))
+      end
+
+      UI.user_error!("No Swift Packages found in #{packages_dir}") if discovered_packages.empty?
+
+      discovered_packages.each do |pkg|
+        pkg_path = File.join(packages_dir, pkg)
+        UI.header("Testing Package: #{pkg}")
+        sh("cd '#{pkg_path}' && xcodebuild test -scheme '#{pkg}' -destination 'platform=macOS,arch=#{host_arch}'")
+      end
+    end
+  end
+
+  desc "Run full iOS app test suite on single Simulator instance"
+  lane :test_app do
+    scan(
+      project: "./RaceEngineer.xcodeproj",
+      scheme: "RaceEngineer",
+      destination: "platform=iOS Simulator,name=iPhone 15",
+      concurrent_workers: 1,
+      disable_concurrent_testing: true,
+      clean: false,
+      output_directory: "./fastlane/test_output"
+    )
+  end
+end

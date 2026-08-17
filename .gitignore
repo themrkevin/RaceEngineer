@@ -29,3 +29,11 @@ DerivedData/
 *.env.local
 *.p12
 *.mobileprovision
+
+# Fastlane artifacts
+fastlane/test_output/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+.bundle/
+vendor/bundle/
