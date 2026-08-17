@@ -35,5 +35,8 @@ fastlane/test_output/
 fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/
+**/test_output/
+*.xcresult
+*.xcresult/
 .bundle/
 vendor/bundle/
