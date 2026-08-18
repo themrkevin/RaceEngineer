@@ -5,7 +5,7 @@ let package = Package(
     name: "TelemetryKit",
     platforms: [
         .iOS(.v17),
-        .macOS(.v14),
+        .macOS(.v13),
     ],
     products: [
         .library(
@@ -16,6 +16,11 @@ let package = Package(
         .target(
             name: "TelemetryKit",
             path: "Sources/TelemetryKit"
+        ),
+        .testTarget(
+            name: "TelemetryKitTests",
+            dependencies: ["TelemetryKit"],
+            path: "Tests/TelemetryKitTests"
         ),
     ]
 )

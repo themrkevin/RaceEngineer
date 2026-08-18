@@ -10,7 +10,7 @@ platform :ios do
   desc "Run tests for a specific Swift Package or all packages natively on macOS"
   lane :test_package do |options|
     package_name = options[:name]
-    packages_dir = File.expand_path("../RaceEngineer/Packages", __dir__)
+    packages_dir = File.expand_path("../Packages", __dir__)
 
     if package_name
       # Test a single specified package
