@@ -17,6 +17,17 @@
 		E08B787F302F92EC00AA3660 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787C302F92EC00AA3660 /* DashboardView.swift */; };
 		E08B7880302F92EC00AA3660 /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787D302F92EC00AA3660 /* ConnectionView.swift */; };
 		E08B7881302F92EC00AA3660 /* TelemetryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */; };
+		E08B7891302FA20000AA3660 /* TelemetryDisplayModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B7890302FA20000AA3660 /* TelemetryDisplayModels.swift */; };
+		E08B7893302FA20000AA3660 /* TelemetryColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B7892302FA20000AA3660 /* TelemetryColors.swift */; };
+		E08B7895302FA20000AA3660 /* TelemetryTypography.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B7894302FA20000AA3660 /* TelemetryTypography.swift */; };
+		E08B7897302FA20000AA3660 /* LinearMeter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B7896302FA20000AA3660 /* LinearMeter.swift */; };
+		E08B7899302FA20000AA3660 /* MetricCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B7898302FA20000AA3660 /* MetricCard.swift */; };
+		E08B789B302FA20000AA3660 /* RPMGaugeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B789A302FA20000AA3660 /* RPMGaugeWidget.swift */; };
+		E08B789D302FA20000AA3660 /* SpeedometerWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B789C302FA20000AA3660 /* SpeedometerWidget.swift */; };
+		E08B789F302FA20000AA3660 /* TireMatrixWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B789E302FA20000AA3660 /* TireMatrixWidget.swift */; };
+		E08B78A1302FA20000AA3660 /* PedalClusterWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */; };
+		E08B78A3302FA20000AA3660 /* FluidTempsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */; };
+		E08B78A5302FA20000AA3660 /* LapTimingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +61,17 @@
 		E08B787D302F92EC00AA3660 /* ConnectionView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = ConnectionView.swift; sourceTree = "<group>"; };
 		E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TelemetryViewModel.swift; sourceTree = "<group>"; };
 		E08B7883302FA0FF00AA3660 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		E08B7890302FA20000AA3660 /* TelemetryDisplayModels.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TelemetryDisplayModels.swift; sourceTree = "<group>"; };
+		E08B7892302FA20000AA3660 /* TelemetryColors.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TelemetryColors.swift; sourceTree = "<group>"; };
+		E08B7894302FA20000AA3660 /* TelemetryTypography.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TelemetryTypography.swift; sourceTree = "<group>"; };
+		E08B7896302FA20000AA3660 /* LinearMeter.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LinearMeter.swift; sourceTree = "<group>"; };
+		E08B7898302FA20000AA3660 /* MetricCard.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = MetricCard.swift; sourceTree = "<group>"; };
+		E08B789A302FA20000AA3660 /* RPMGaugeWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = RPMGaugeWidget.swift; sourceTree = "<group>"; };
+		E08B789C302FA20000AA3660 /* SpeedometerWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SpeedometerWidget.swift; sourceTree = "<group>"; };
+		E08B789E302FA20000AA3660 /* TireMatrixWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = TireMatrixWidget.swift; sourceTree = "<group>"; };
+		E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PedalClusterWidget.swift; sourceTree = "<group>"; };
+		E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FluidTempsWidget.swift; sourceTree = "<group>"; };
+		E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LapTimingWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -138,11 +160,94 @@
 		E08B787B302F92EC00AA3660 /* UI */ = {
 			isa = PBXGroup;
 			children = (
-				E08B787C302F92EC00AA3660 /* DashboardView.swift */,
-				E08B787D302F92EC00AA3660 /* ConnectionView.swift */,
-				E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */,
+				E08B78AC302FA30000AA3660 /* AppState */,
+				E08B78A6302FA20000AA3660 /* Models */,
+				E08B78A7302FA20000AA3660 /* DesignSystem */,
+				E08B78AD302FA30000AA3660 /* Features */,
 			);
 			path = UI;
+			sourceTree = "<group>";
+		};
+		E08B78AC302FA30000AA3660 /* AppState */ = {
+			isa = PBXGroup;
+			children = (
+				E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */,
+			);
+			path = AppState;
+			sourceTree = "<group>";
+		};
+		E08B78A6302FA20000AA3660 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				E08B7890302FA20000AA3660 /* TelemetryDisplayModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		E08B78A7302FA20000AA3660 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				E08B78A8302FA20000AA3660 /* Theme */,
+				E08B78A9302FA20000AA3660 /* Components */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		E08B78A8302FA20000AA3660 /* Theme */ = {
+			isa = PBXGroup;
+			children = (
+				E08B7892302FA20000AA3660 /* TelemetryColors.swift */,
+				E08B7894302FA20000AA3660 /* TelemetryTypography.swift */,
+			);
+			path = Theme;
+			sourceTree = "<group>";
+		};
+		E08B78A9302FA20000AA3660 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				E08B7896302FA20000AA3660 /* LinearMeter.swift */,
+				E08B7898302FA20000AA3660 /* MetricCard.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+		E08B78AD302FA30000AA3660 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				E08B78AE302FA30000AA3660 /* Connection */,
+				E08B78AF302FA30000AA3660 /* Dashboard */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		E08B78AE302FA30000AA3660 /* Connection */ = {
+			isa = PBXGroup;
+			children = (
+				E08B787D302F92EC00AA3660 /* ConnectionView.swift */,
+			);
+			path = Connection;
+			sourceTree = "<group>";
+		};
+		E08B78AF302FA30000AA3660 /* Dashboard */ = {
+			isa = PBXGroup;
+			children = (
+				E08B787C302F92EC00AA3660 /* DashboardView.swift */,
+				E08B78AB302FA20000AA3660 /* Widgets */,
+			);
+			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		E08B78AB302FA20000AA3660 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				E08B789A302FA20000AA3660 /* RPMGaugeWidget.swift */,
+				E08B789C302FA20000AA3660 /* SpeedometerWidget.swift */,
+				E08B789E302FA20000AA3660 /* TireMatrixWidget.swift */,
+				E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */,
+				E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */,
+				E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */,
+			);
+			path = Widgets;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -285,6 +390,17 @@
 				E08B7880302F92EC00AA3660 /* ConnectionView.swift in Sources */,
 				E08B7881302F92EC00AA3660 /* TelemetryViewModel.swift in Sources */,
 				E08B787F302F92EC00AA3660 /* DashboardView.swift in Sources */,
+				E08B7891302FA20000AA3660 /* TelemetryDisplayModels.swift in Sources */,
+				E08B7893302FA20000AA3660 /* TelemetryColors.swift in Sources */,
+				E08B7895302FA20000AA3660 /* TelemetryTypography.swift in Sources */,
+				E08B7897302FA20000AA3660 /* LinearMeter.swift in Sources */,
+				E08B7899302FA20000AA3660 /* MetricCard.swift in Sources */,
+				E08B789B302FA20000AA3660 /* RPMGaugeWidget.swift in Sources */,
+				E08B789D302FA20000AA3660 /* SpeedometerWidget.swift in Sources */,
+				E08B789F302FA20000AA3660 /* TireMatrixWidget.swift in Sources */,
+				E08B78A1302FA20000AA3660 /* PedalClusterWidget.swift in Sources */,
+				E08B78A3302FA20000AA3660 /* FluidTempsWidget.swift in Sources */,
+				E08B78A5302FA20000AA3660 /* LapTimingWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
