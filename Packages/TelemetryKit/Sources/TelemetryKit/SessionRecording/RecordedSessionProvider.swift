@@ -41,6 +41,7 @@ public actor RecordedSessionProvider: TelemetryProvider {
               headerData.withUnsafeBytes({ $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) }) == 0x52414345 else {
             logger.error("❌ Corrupt or invalid .race file header at: \(self.fileURL.lastPathComponent)")
             try? handle.close()
+            streamContinuation?.finish()
             return
         }
 
