@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import os
 
 /// Handles high-performance 60Hz telemetry recording to .race binary files with zero hot-path allocations.
 public actor TelemetryRecorder {
@@ -11,6 +12,11 @@ public actor TelemetryRecorder {
     private var isPaused = false
     private var currentFileURL: URL?
     private var fileHandle: FileHandle?
+    private var droppedFrameCount: UInt64 = 0
+    private var acceptedFrameCount: UInt64 = 0
+    private var skippedPausedFrameCount: UInt64 = 0
+    private var loggedDisabledFrame = false
+    private var loggedPausedFrame = false
     
     private var lastPacketTimestamp = ContinuousClock.now
     private var processingTask: Task<Void, Never>?
@@ -24,8 +30,11 @@ public actor TelemetryRecorder {
     private var stateContinuation: AsyncStream<RecordingState>.Continuation?
     public let stateStream: AsyncStream<RecordingState>
 
-    // Ingress Stream for Non-Blocking 60Hz Direct Yields
+    // Lossless ingress stream for non-blocking 60Hz frame handoff.
+    // The writer task drains this channel and applies batched disk I/O.
     private let frameContinuation: AsyncStream<(Data, Bool)>.Continuation
+    private let pendingIngressCount = OSAllocatedUnfairLock(initialState: UInt64(0))
+    private let ingressDroppedFrameCount = OSAllocatedUnfairLock(initialState: UInt64(0))
 
     // Static Date Formatter
     private static let fileNameDateFormatter: DateFormatter = {
@@ -45,7 +54,7 @@ public actor TelemetryRecorder {
         self.stateContinuation = localStateContinuation
 
         var localFrameContinuation: AsyncStream<(Data, Bool)>.Continuation!
-        let frameStream = AsyncStream<(Data, Bool)>(bufferingPolicy: .bufferingNewest(120)) { continuation in
+        let frameStream = AsyncStream<(Data, Bool)>(bufferingPolicy: .unbounded) { continuation in
             localFrameContinuation = continuation
         }
         self.frameContinuation = localFrameContinuation
@@ -84,42 +93,82 @@ public actor TelemetryRecorder {
         let state = RecordingState(
             isRecording: isRecording,
             isPaused: isPaused,
-            currentFileURL: currentFileURL
+            currentFileURL: currentFileURL,
+            droppedFrameCount: droppedFrameCount
         )
         stateContinuation?.yield(state)
     }
 
     // MARK: - Configuration & Public API
 
-    public func setAutoRecordingEnabled(_ enabled: Bool) {
+    public func currentRecordingState() -> RecordingState {
+        RecordingState(
+            isRecording: isRecording,
+            isPaused: isPaused,
+            currentFileURL: currentFileURL,
+            droppedFrameCount: droppedFrameCount
+        )
+    }
+
+    public func setAutoRecordingEnabled(_ enabled: Bool) async {
         self.isAutoRecordingEnabled = enabled
+        logger.info("🎙️ Recorder auto-recording state: \(enabled, privacy: .public)")
         if !enabled && self.isRecording {
+            await flushIngress()
             self.performStopRecording()
         }
     }
 
-    public func startManualRecording() throws -> URL {
+    public func startManualRecording() async throws -> URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let timestamp = Self.fileNameDateFormatter.string(from: Date())
         let fileURL = docs.appendingPathComponent("GT7_Manual_\(timestamp).race")
 
+        await flushIngress()
         try self.performStartRecording(to: fileURL)
+        logger.info("🖐️ Manual recording active: \(self.isRecording, privacy: .public), file=\(fileURL.lastPathComponent, privacy: .public)")
         return fileURL
     }
 
-    public func startRecording(to fileURL: URL) throws {
+    public func startRecording(to fileURL: URL) async throws {
+        await flushIngress()
         try self.performStartRecording(to: fileURL)
     }
 
-    public func stopRecording() {
+    public func stopRecording() async {
+        await flushIngress()
         self.performStopRecording()
     }
 
-    // MARK: - 60Hz Non-Allocating Ingress (nonisolated)
+    /// Waits until all frames accepted by the ingress channel have been processed.
+    public func flushIngress() async {
+        while pendingIngressCount.withLock({ $0 > 0 }) {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        flushBuffer()
+    }
 
-    /// Synchronously yields frames directly from UDP network receive callback with zero allocations.
+    // MARK: - 60Hz Lossless Ingress (nonisolated)
+
+    /// Hands frames to the writer channel without evicting older frames when the writer is busy.
     nonisolated public func processFrameDirect(rawData: Data, isGamePaused: Bool) {
-        frameContinuation.yield((rawData, isGamePaused))
+        pendingIngressCount.withLock { count in
+            count += 1
+        }
+        let result = frameContinuation.yield((rawData, isGamePaused))
+        if case .enqueued = result {
+            return
+        } else {
+            pendingIngressCount.withLock { count in
+                count = count > 0 ? count - 1 : 0
+            }
+        }
+
+        if case .dropped = result {
+            ingressDroppedFrameCount.withLock { count in
+                count += 1
+            }
+        }
     }
 
     /// Direct frame recording helper for testing.
@@ -132,29 +181,43 @@ public actor TelemetryRecorder {
     private func processFrameLoop(stream: AsyncStream<(Data, Bool)>) async {
         for await (data, isPaused) in stream {
             if Task.isCancelled { break }
+            updateDroppedFrameCountIfNeeded()
             processSingleFrame(rawData: data, isGamePaused: isPaused)
+            pendingIngressCount.withLock { count in
+                count = count > 0 ? count - 1 : 0
+            }
         }
     }
 
+    private func updateDroppedFrameCountIfNeeded() {
+        let newlyDropped = ingressDroppedFrameCount.withLock { count -> UInt64 in
+            defer { count = 0 }
+            return count
+        }
+
+        guard newlyDropped > 0 else { return }
+        droppedFrameCount += newlyDropped
+        logger.error("⚠️ Telemetry recording degraded: dropped \(newlyDropped) ingress frame(s), total \(self.droppedFrameCount)")
+        broadcastState()
+    }
+
     private func processSingleFrame(rawData: Data, isGamePaused: Bool) {
-        guard self.isAutoRecordingEnabled || self.isRecording else { return }
-
-        self.lastPacketTimestamp = ContinuousClock.now
-
-        if isGamePaused {
-            if !self.isPaused {
-                self.isPaused = true
-                self.flushBuffer()
-                self.broadcastState()
-                self.logger.info("⏸️ Telemetry recording suspended (Paused).")
+        guard self.isAutoRecordingEnabled || self.isRecording else {
+            if !loggedDisabledFrame {
+                loggedDisabledFrame = true
+                logger.error("⚠️ Telemetry frame received while recorder is disabled; no frames will be persisted")
             }
             return
         }
 
-        if self.isPaused {
-            self.isPaused = false
-            self.broadcastState()
-            self.logger.info("▶️ Telemetry recording resumed.")
+        self.lastPacketTimestamp = ContinuousClock.now
+
+        if isGamePaused {
+            skippedPausedFrameCount += 1
+            if !loggedPausedFrame {
+                loggedPausedFrame = true
+                logger.warning("⚠️ Telemetry packet marked paused; recording continues because pause mapping is provisional")
+            }
         }
 
         if !self.isRecording {
@@ -166,6 +229,13 @@ public actor TelemetryRecorder {
 
         // Buffer frame into contiguous memory
         self.writeBuffer.append(rawData)
+        acceptedFrameCount += 1
+
+        if acceptedFrameCount == 1 {
+            logger.info("✅ First telemetry frame accepted for recording")
+        } else if acceptedFrameCount % 600 == 0 {
+            logger.info("📼 Recording checkpoint: accepted=\(self.acceptedFrameCount), pausedSkipped=\(self.skippedPausedFrameCount), bufferedBytes=\(self.writeBuffer.count)")
+        }
 
         if self.writeBuffer.count >= Self.maxBufferedBytes {
             self.flushBuffer()
@@ -195,6 +265,14 @@ public actor TelemetryRecorder {
         performStopRecording()
 
         self.currentFileURL = fileURL
+        self.droppedFrameCount = 0
+        self.acceptedFrameCount = 0
+        self.skippedPausedFrameCount = 0
+        self.loggedDisabledFrame = false
+        self.loggedPausedFrame = false
+        ingressDroppedFrameCount.withLock { count in
+            count = 0
+        }
         FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: fileURL)
 
@@ -219,7 +297,11 @@ public actor TelemetryRecorder {
     private func performStopRecording() {
         guard isRecording else { return }
 
+        updateDroppedFrameCountIfNeeded()
         flushBuffer()
+
+        let finalByteCount = (fileHandle?.offsetInFile ?? UInt64(RaceFileHeader.headerSize)) + UInt64(writeBuffer.count)
+        logger.info("📼 Recording finalized: frames=\(self.acceptedFrameCount), pausedSkipped=\(self.skippedPausedFrameCount), dropped=\(self.droppedFrameCount), bytes=\(finalByteCount)")
 
         try? fileHandle?.synchronize()
         try? fileHandle?.close()

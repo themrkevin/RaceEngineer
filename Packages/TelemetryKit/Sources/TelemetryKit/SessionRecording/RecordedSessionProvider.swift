@@ -1,13 +1,26 @@
 import Foundation
 import OSLog
 
-/// Reads recorded .race binary files and streams them as TelemetryPackets matching live 60Hz behavior.
+public enum RecordedSessionError: Error, Equatable, Sendable {
+    case fileNotFound(URL)
+    case invalidHeader
+    case unsupportedHeader(RaceFileHeader)
+    case truncatedFrame(expected: Int, actual: Int)
+    case playbackStreamFinished
+}
+
+/// Reads a recorded .race file and streams it as TelemetryPackets matching live 60Hz behavior.
+///
+/// A provider owns one telemetry stream. Once playback reaches EOF or fails validation,
+/// that stream is finished and the provider cannot be restarted. Create a new provider
+/// for another playback session.
 public actor RecordedSessionProvider: TelemetryProvider {
     private let logger = Logger(subsystem: "com.raceengineer", category: "RecordedSessionProvider")
     
     private let fileURL: URL
     private let playbackSpeed: Double
     private var playbackTask: Task<Void, Never>?
+    private var hasFinishedStream = false
     
     private let streamInstance: AsyncStream<TelemetryPacket>
     private var streamContinuation: AsyncStream<TelemetryPacket>.Continuation?
@@ -23,60 +36,78 @@ public actor RecordedSessionProvider: TelemetryProvider {
         self.streamContinuation = localContinuation
     }
 
-    nonisolated public func telemetryStream() -> AsyncStream<TelemetryPacket> {
+    public func telemetryStream() async -> AsyncStream<TelemetryPacket> {
         return streamInstance
-    }
-
-    // MARK: - TelemetryProvider Protocol Conformance (Recording Stubs)
-
-    nonisolated public func recordingStateStream() -> AsyncStream<RecordingState> {
-        AsyncStream { continuation in
-            continuation.yield(.idle)
-            continuation.finish()
-        }
-    }
-
-    public func setAutoRecordingEnabled(_ enabled: Bool) async {
-        // No-op for recorded session playback
-    }
-
-    public func startManualRecording() async throws -> URL {
-        throw NSError(
-            domain: "com.raceengineer.RecordedSessionProvider",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Cannot record during session playback."]
-        )
-    }
-
-    public func stopRecording() async {
-        // No-op for recorded session playback
     }
 
     // MARK: - Playback Lifecycle
 
     public func start(ipAddress: String = "") async throws {
+        guard !hasFinishedStream else {
+            throw RecordedSessionError.playbackStreamFinished
+        }
+
         stop()
 
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
             logger.error("❌ Cannot open recording at path: \(self.fileURL.path)")
+            hasFinishedStream = true
             streamContinuation?.finish()
-            return
+            throw RecordedSessionError.fileNotFound(fileURL)
         }
 
         // Validate 16-byte header magic and format
         guard let headerData = try? handle.read(upToCount: RaceFileHeader.headerSize),
               headerData.count == RaceFileHeader.headerSize,
-              let header = RaceFileHeader.deserialize(from: headerData),
-              header.isValid else {
+              let header = RaceFileHeader.deserialize(from: headerData) else {
             logger.error("❌ Corrupt or invalid .race file header at: \(self.fileURL.lastPathComponent)")
             try? handle.close()
+            hasFinishedStream = true
             streamContinuation?.finish()
-            return
+            throw RecordedSessionError.invalidHeader
+        }
+
+        guard header.magic == RaceFileHeader.expectedMagic else {
+            logger.error("❌ Invalid .race file magic at: \(self.fileURL.lastPathComponent)")
+            try? handle.close()
+            hasFinishedStream = true
+            streamContinuation?.finish()
+            throw RecordedSessionError.invalidHeader
+        }
+
+        guard header.isValid else {
+            logger.error("❌ Unsupported .race file header at: \(self.fileURL.lastPathComponent)")
+            try? handle.close()
+            hasFinishedStream = true
+            streamContinuation?.finish()
+            throw RecordedSessionError.unsupportedHeader(header)
         }
 
         let packetSize = Int(header.packetSize)
         let sampleRate = Double(header.sampleRate)
         let effectivePlaybackSpeed = self.playbackSpeed
+
+        guard let endOffset = try? handle.seekToEnd() else {
+            try? handle.close()
+            hasFinishedStream = true
+            streamContinuation?.finish()
+            throw RecordedSessionError.fileNotFound(fileURL)
+        }
+
+        let payloadSize = endOffset - UInt64(RaceFileHeader.headerSize)
+        let trailingBytes = payloadSize % UInt64(packetSize)
+        guard trailingBytes == 0 else {
+            logger.error("❌ Incomplete telemetry frame in \(self.fileURL.lastPathComponent)")
+            try? handle.close()
+            hasFinishedStream = true
+            streamContinuation?.finish()
+            throw RecordedSessionError.truncatedFrame(
+                expected: packetSize,
+                actual: Int(trailingBytes)
+            )
+        }
+
+        try? handle.seek(toOffset: UInt64(RaceFileHeader.headerSize))
 
         logger.info("▶️ Starting playback from \(self.fileURL.lastPathComponent) at \(self.playbackSpeed)x speed (\(sampleRate)Hz, \(packetSize) bytes/packet)")
 
@@ -85,11 +116,15 @@ public actor RecordedSessionProvider: TelemetryProvider {
             return
         }
 
-        playbackTask = Task.detached(priority: .userInitiated) { [weak self] in
+        let logger = self.logger
+        let fileName = self.fileURL.lastPathComponent
+        hasFinishedStream = true
+
+        playbackTask = Task.detached(priority: .userInitiated) { [logger, fileName] in
             defer {
                 try? handle.close()
                 continuation.finish()
-                self?.logger.info("🏁 Session playback finished.")
+                logger.info("🏁 Session playback finished.")
             }
 
             let clock = ContinuousClock()
@@ -98,9 +133,13 @@ public actor RecordedSessionProvider: TelemetryProvider {
             var targetTime = clock.now
 
             while !Task.isCancelled {
-                guard let frameBuffer = try? handle.read(upToCount: packetSize),
-                      frameBuffer.count == packetSize else {
+                guard let frameBuffer = try? handle.read(upToCount: packetSize) else {
                     break // End of stream reached
+                }
+
+                guard frameBuffer.count == packetSize else {
+                    logger.error("❌ Truncated telemetry frame in \(fileName)")
+                    break
                 }
 
                 // Ingress through single-pass packet parser

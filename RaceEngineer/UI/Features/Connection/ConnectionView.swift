@@ -100,6 +100,17 @@ public struct ConnectionView: View {
                     .foregroundColor(TelemetryColors.mutedText)
                 }
                 .disabled(viewModel.isConnecting)
+
+                NavigationLink {
+                    SessionLogListView()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "list.bullet.rectangle")
+                        Text("Recorded Sessions")
+                    }
+                    .font(.subheadline)
+                    .foregroundColor(TelemetryColors.mutedText)
+                }
             }
             .padding(.horizontal, 36)
 

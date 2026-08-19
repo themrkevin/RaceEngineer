@@ -9,29 +9,10 @@ public actor MockTelemetryProvider: TelemetryProvider {
         self.continuation = AsyncStream.makeStream(of: TelemetryPacket.self, bufferingPolicy: .bufferingNewest(5))
     }
     
-    nonisolated public func telemetryStream() -> AsyncStream<TelemetryPacket> {
+    public func telemetryStream() async -> AsyncStream<TelemetryPacket> {
         return continuation.stream
     }
 
-    nonisolated public func recordingStateStream() -> AsyncStream<RecordingState> {
-        AsyncStream { continuation in
-            continuation.yield(.idle)
-            continuation.finish()
-        }
-    }
-
-    public func setAutoRecordingEnabled(_ enabled: Bool) async {}
-
-    public func startManualRecording() async throws -> URL {
-        throw NSError(
-            domain: "com.raceengineer.MockTelemetryProvider",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Recording is not supported in mock mode."]
-        )
-    }
-
-    public func stopRecording() async {}
-    
     public func start(ipAddress: String) async throws {
         stop()
         

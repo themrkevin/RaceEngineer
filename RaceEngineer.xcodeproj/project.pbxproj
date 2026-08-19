@@ -28,6 +28,9 @@
 		E08B78A1302FA20000AA3660 /* PedalClusterWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */; };
 		E08B78A3302FA20000AA3660 /* FluidTempsWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */; };
 		E08B78A5302FA20000AA3660 /* LapTimingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */; };
+		E08B78B1302FA40000AA3660 /* SessionLogListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78B0302FA40000AA3660 /* SessionLogListView.swift */; };
+		E08B78B3302FA40000AA3660 /* SessionDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78B2302FA40000AA3660 /* SessionDetailView.swift */; };
+		E08B78B5302FA40000AA3660 /* SessionSummaryCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B78B4302FA40000AA3660 /* SessionSummaryCardView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -72,6 +75,9 @@
 		E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = PedalClusterWidget.swift; sourceTree = "<group>"; };
 		E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = FluidTempsWidget.swift; sourceTree = "<group>"; };
 		E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LapTimingWidget.swift; sourceTree = "<group>"; };
+		E08B78B0302FA40000AA3660 /* SessionLogListView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SessionLogListView.swift; sourceTree = "<group>"; };
+		E08B78B2302FA40000AA3660 /* SessionDetailView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SessionDetailView.swift; sourceTree = "<group>"; };
+		E08B78B4302FA40000AA3660 /* SessionSummaryCardView.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = SessionSummaryCardView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -229,6 +235,7 @@
 			children = (
 				E08B78AE302FA30000AA3660 /* Connection */,
 				E08B78AF302FA30000AA3660 /* Dashboard */,
+				E08B78B6302FA40000AA3660 /* SessionLogs */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -248,6 +255,24 @@
 				E08B78AB302FA20000AA3660 /* Widgets */,
 			);
 			path = Dashboard;
+			sourceTree = "<group>";
+		};
+		E08B78B6302FA40000AA3660 /* SessionLogs */ = {
+			isa = PBXGroup;
+			children = (
+				E08B78B0302FA40000AA3660 /* SessionLogListView.swift */,
+				E08B78B2302FA40000AA3660 /* SessionDetailView.swift */,
+				E08B78B7302FA40000AA3660 /* Views */,
+			);
+			path = SessionLogs;
+			sourceTree = "<group>";
+		};
+		E08B78B7302FA40000AA3660 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				E08B78B4302FA40000AA3660 /* SessionSummaryCardView.swift */,
+			);
+			path = Views;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -401,6 +426,9 @@
 				E08B78A1302FA20000AA3660 /* PedalClusterWidget.swift in Sources */,
 				E08B78A3302FA20000AA3660 /* FluidTempsWidget.swift in Sources */,
 				E08B78A5302FA20000AA3660 /* LapTimingWidget.swift in Sources */,
+				E08B78B1302FA40000AA3660 /* SessionLogListView.swift in Sources */,
+				E08B78B3302FA40000AA3660 /* SessionDetailView.swift in Sources */,
+				E08B78B5302FA40000AA3660 /* SessionSummaryCardView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

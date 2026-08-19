@@ -3,7 +3,7 @@ import Network
 import OSLog
 import os
 
-public actor GT7TelemetryProvider: TelemetryProvider {
+public actor GT7TelemetryProvider: TelemetryProvider, TelemetryRecordable {
     private enum TelemetryConfig {
         static let inboundPort: NWEndpoint.Port = 33740 
         static let outboundPort: NWEndpoint.Port = 33739 
@@ -20,8 +20,15 @@ public actor GT7TelemetryProvider: TelemetryProvider {
 
     private let recorder = TelemetryRecorder()
     private var streamContinuation: AsyncStream<TelemetryPacket>.Continuation?
-    private let telemetryStreamInstance: AsyncStream<TelemetryPacket>
+    private var telemetryStreamInstance: AsyncStream<TelemetryPacket>
     private let networkQueue = DispatchQueue(label: "com.raceengineer.telemetry.network", qos: .userInteractive)
+    private let packetDiagnostics = OSAllocatedUnfairLock(initialState: PacketDiagnostics())
+
+    private struct PacketDiagnostics: Sendable {
+        var validPacketCount: UInt64 = 0
+        var pausedPacketCount: UInt64 = 0
+        var hasLoggedFirstPacket = false
+    }
 
     public init() {
         var localContinuation: AsyncStream<TelemetryPacket>.Continuation?
@@ -31,7 +38,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         self.streamContinuation = localContinuation
     }
 
-    nonisolated public func telemetryStream() -> AsyncStream<TelemetryPacket> {
+    public func telemetryStream() async -> AsyncStream<TelemetryPacket> {
         return telemetryStreamInstance
     }
 
@@ -39,21 +46,33 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         return recorder.stateStream
     }
 
+    public func currentRecordingState() async -> RecordingState {
+        await recorder.currentRecordingState()
+    }
+
     public func setAutoRecordingEnabled(_ enabled: Bool) async {
+        logger.info("🎙️ Auto-recording requested: \(enabled, privacy: .public)")
         await recorder.setAutoRecordingEnabled(enabled)
     }
 
     public func startManualRecording() async throws -> URL {
-        try await recorder.startManualRecording()
+        let url = try await recorder.startManualRecording()
+        logger.info("🎙️ Manual recording started: \(url.lastPathComponent, privacy: .public)")
+        return url
     }
 
     public func stopRecording() async {
+        logger.info("🎙️ Manual recording stop requested")
         await recorder.stopRecording()
     }
 
     public func start(ipAddress: String) async throws {
         await stop()
+        resetTelemetryStream()
         hasLoggedFirstPacket.withLock { $0 = false }
+        packetDiagnostics.withLock { diagnostics in
+            diagnostics = PacketDiagnostics()
+        }
 
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
@@ -82,6 +101,15 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         logger.info("🚀 GT7 Provider Started (Packet C). Target: \(ipAddress)")
     }
 
+    private func resetTelemetryStream() {
+        var localContinuation: AsyncStream<TelemetryPacket>.Continuation?
+        telemetryStreamInstance = AsyncStream(bufferingPolicy: .bufferingNewest(5)) { continuation in
+            localContinuation = continuation
+        }
+        streamContinuation = localContinuation
+        logger.info("🔄 Created fresh telemetry stream for connection")
+    }
+
     public func stop() async {
         heartbeatTask?.cancel()
         heartbeatTask = nil
@@ -104,18 +132,21 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         activeInboundConnection?.cancel()
         activeInboundConnection = connection
         connection.start(queue: networkQueue)
+        logger.info("📡 GT7 inbound telemetry connection established")
 
         guard let continuation = self.streamContinuation else { return }
         let recorder = self.recorder
         let logger = self.logger
         let firstPacketLock = self.hasLoggedFirstPacket
+        let packetDiagnostics = self.packetDiagnostics
 
         Self.listenNextPacket(
             on: connection,
             continuation: continuation,
             recorder: recorder,
             logger: logger,
-            firstPacketLock: firstPacketLock
+            firstPacketLock: firstPacketLock,
+            packetDiagnostics: packetDiagnostics
         )
     }
 
@@ -124,7 +155,8 @@ public actor GT7TelemetryProvider: TelemetryProvider {
         continuation: AsyncStream<TelemetryPacket>.Continuation,
         recorder: TelemetryRecorder,
         logger: Logger,
-        firstPacketLock: OSAllocatedUnfairLock<Bool>
+        firstPacketLock: OSAllocatedUnfairLock<Bool>,
+        packetDiagnostics: OSAllocatedUnfairLock<PacketDiagnostics>
     ) {
         connection.receiveMessage { content, _, _, error in
             if error == nil {
@@ -133,7 +165,8 @@ public actor GT7TelemetryProvider: TelemetryProvider {
                     continuation: continuation,
                     recorder: recorder,
                     logger: logger,
-                    firstPacketLock: firstPacketLock
+                    firstPacketLock: firstPacketLock,
+                    packetDiagnostics: packetDiagnostics
                 )
             }
 
@@ -143,6 +176,24 @@ public actor GT7TelemetryProvider: TelemetryProvider {
             let packet = GT7Packet(decryptedData: decrypted)
 
             if packet.magic == TelemetryConfig.expectedMagic {
+                let diagnostics = packetDiagnostics.withLock { diagnostics -> PacketDiagnostics in
+                    diagnostics.validPacketCount += 1
+                    if packet.isGamePaused {
+                        diagnostics.pausedPacketCount += 1
+                    }
+                    return diagnostics
+                }
+
+                if !diagnostics.hasLoggedFirstPacket {
+                    packetDiagnostics.withLock { diagnostics in
+                        diagnostics.hasLoggedFirstPacket = true
+                    }
+                    let rawFlags = String(format: "%04X", packet.rawSessionFlags)
+                    logger.info("🔎 First valid packet: seq=\(packet.packetSequence), cars=\(packet.totalCars), paused=\(packet.isGamePaused), rawFlags=0x\(rawFlags)")
+                } else if diagnostics.validPacketCount % 600 == 0 {
+                    logger.info("🔎 Packet checkpoint: valid=\(diagnostics.validPacketCount), paused=\(diagnostics.pausedPacketCount), seq=\(packet.packetSequence)")
+                }
+
                 continuation.yield(packet)
                 
                 // Pure synchronous queue handoff — NO unmanaged Task allocations

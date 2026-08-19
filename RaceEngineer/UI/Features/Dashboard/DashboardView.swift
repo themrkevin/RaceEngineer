@@ -78,7 +78,7 @@ public struct DashboardView: View {
 
                 // Recording & Disconnect Control Strip
                 HStack(spacing: 8) {
-                    autoRecordToggle
+                    // autoRecordToggle
                     manualRecordButton
 
                     // Disconnect Button

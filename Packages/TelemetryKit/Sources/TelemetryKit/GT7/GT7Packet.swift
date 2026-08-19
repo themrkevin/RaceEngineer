@@ -56,6 +56,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let currentLapTime: TimeInterval?
     public let isGamePaused: Bool
     public let inPitLane: Bool
+    public let rawSessionFlags: UInt16
     
     // 6. Extended Dynamics & Tuning Channels
     public let steeringAngle: Float
@@ -113,6 +114,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
             self.currentLapTime = nil
             self.isGamePaused = false
             self.inPitLane = false
+            self.rawSessionFlags = 0
             self.steeringAngle = 0
             self.steeringAngularVelocity = 0
             self.gForce = .zero
@@ -217,6 +219,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
 
         // Session Flags (Offset 0x8E - UInt16)
         let flags = data.readUInt16(at: 0x8E)
+        self.rawSessionFlags = flags
         self.isGamePaused = (flags & 0x0001) != 0
         self.inPitLane = (flags & 0x0010) != 0
 

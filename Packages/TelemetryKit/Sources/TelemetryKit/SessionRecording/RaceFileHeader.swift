@@ -32,7 +32,10 @@ public struct RaceFileHeader: Sendable, Equatable {
     }
 
     public var isValid: Bool {
-        magic == Self.expectedMagic && version == Self.currentVersion && packetSize > 0 && sampleRate > 0
+        magic == Self.expectedMagic &&
+        version == Self.currentVersion &&
+        packetSize == Self.standardPacketSize &&
+        sampleRate == Self.standardSampleRate
     }
 
     /// Serializes the header into 16 bytes with fixed endianness.

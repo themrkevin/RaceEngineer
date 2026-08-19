@@ -31,7 +31,8 @@ public class TelemetryViewModel {
         didSet {
             Task { [weak self] in
                 guard let self else { return }
-                await self.provider?.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
+                guard let recordable = self.provider as? any TelemetryRecordable else { return }
+                await recordable.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
             }
         }
     }
@@ -55,6 +56,8 @@ public class TelemetryViewModel {
     private var provider: (any TelemetryProvider)?
     private var streamTask: Task<Void, Never>?
     private var recordingStateTask: Task<Void, Never>?
+    private var lifecycleTask: Task<Void, Never>?
+    private var receivedPacketCount: UInt64 = 0
 
     // MARK: - Lifecycle
     public init(provider: (any TelemetryProvider)? = nil) {
@@ -64,6 +67,7 @@ public class TelemetryViewModel {
     // MARK: - User Intents & Actions
 
     public func connect(ipAddress: String, isMock: Bool = false) {
+        lifecycleTask?.cancel()
         isConnected = false
         isConnecting = true
         connectionError = nil
@@ -71,9 +75,15 @@ public class TelemetryViewModel {
         let selectedProvider: any TelemetryProvider = provider ?? (isMock ? MockTelemetryProvider() : GT7TelemetryProvider())
         self.provider = selectedProvider
 
-        Task {
+        lifecycleTask = Task { [weak self] in
+            guard let self else { return }
             do {
-                await selectedProvider.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
+                await self.stopConsumers()
+                await selectedProvider.stop()
+
+                if let recordable = selectedProvider as? any TelemetryRecordable {
+                    await recordable.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
+                }
                 try await selectedProvider.start(ipAddress: ipAddress)
                 self.isConnected = true
                 self.isConnecting = false
@@ -81,8 +91,9 @@ public class TelemetryViewModel {
 
                 // 1. Observe 60Hz telemetry stream
                 self.streamTask?.cancel()
+                let telemetryStream = await selectedProvider.telemetryStream()
                 self.streamTask = Task { [weak self] in
-                    for await packet in selectedProvider.telemetryStream() {
+                    for await packet in telemetryStream {
                         if Task.isCancelled { break }
                         self?.update(with: packet)
                     }
@@ -90,15 +101,20 @@ public class TelemetryViewModel {
 
                 // 2. Observe recording state reactively (no manual state flags)
                 self.recordingStateTask?.cancel()
-                self.recordingStateTask = Task { [weak self] in
-                    for await state in selectedProvider.recordingStateStream() {
-                        if Task.isCancelled { break }
-                        self?.isRecording = state.isRecording
-                        self?.isRecordingPaused = state.isPaused
-                        if let url = state.currentFileURL {
-                            self?.lastSavedFileURL = url
+                if let recordable = selectedProvider as? any TelemetryRecordable {
+                    self.recordingStateTask = Task { [weak self] in
+                        for await state in recordable.recordingStateStream() {
+                            if Task.isCancelled { break }
+                            self?.isRecording = state.isRecording
+                            self?.isRecordingPaused = state.isPaused
+                            if let url = state.currentFileURL {
+                                self?.lastSavedFileURL = url
+                            }
                         }
                     }
+
+                    let currentState = await recordable.currentRecordingState()
+                    self.apply(recordingState: currentState)
                 }
             } catch {
                 self.connectionError = "Failed to connect: \(error.localizedDescription)"
@@ -110,12 +126,11 @@ public class TelemetryViewModel {
     }
 
     public func disconnect() {
-        Task {
-            await provider?.stop()
-            streamTask?.cancel()
-            streamTask = nil
-            recordingStateTask?.cancel()
-            recordingStateTask = nil
+        lifecycleTask?.cancel()
+        lifecycleTask = Task { [weak self] in
+            guard let self else { return }
+            await self.stopConsumers()
+            await self.provider?.stop()
             isConnected = false
             isConnecting = false
             isRecording = false
@@ -123,14 +138,29 @@ public class TelemetryViewModel {
         }
     }
 
+    private func stopConsumers() async {
+        let currentStreamTask = streamTask
+        let currentRecordingStateTask = recordingStateTask
+
+        streamTask?.cancel()
+        recordingStateTask?.cancel()
+        streamTask = nil
+        recordingStateTask = nil
+
+        await currentStreamTask?.value
+        await currentRecordingStateTask?.value
+    }
+
     public func toggleManualRecording() {
         Task {
-            guard let provider else { return }
+            guard let recordable = provider as? any TelemetryRecordable else { return }
             if isRecording {
-                await provider.stopRecording()
+                await recordable.stopRecording()
+                self.apply(recordingState: await recordable.currentRecordingState())
             } else {
                 do {
-                    _ = try await provider.startManualRecording()
+                    _ = try await recordable.startManualRecording()
+                    self.apply(recordingState: await recordable.currentRecordingState())
                 } catch {
                     self.logger.error("Failed to start manual recording: \(error.localizedDescription)")
                 }
@@ -138,9 +168,22 @@ public class TelemetryViewModel {
         }
     }
 
+    private func apply(recordingState: RecordingState) {
+        isRecording = recordingState.isRecording
+        isRecordingPaused = recordingState.isPaused
+        if let url = recordingState.currentFileURL {
+            lastSavedFileURL = url
+        }
+    }
+
     // MARK: - 60Hz Snapshot Updates
 
     private func update(with packet: TelemetryPacket) {
+        receivedPacketCount += 1
+        if receivedPacketCount == 1 || receivedPacketCount % 600 == 0 {
+            logger.info("📱 ViewModel packet checkpoint: received=\(self.receivedPacketCount), rpm=\(packet.engineRPM), speed=\(packet.speedMph)")
+        }
+
         self.carCode = packet.carCode
 
         self.motion = MotionState(
