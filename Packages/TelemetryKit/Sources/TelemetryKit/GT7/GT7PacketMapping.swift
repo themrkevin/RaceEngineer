@@ -51,7 +51,7 @@ public enum GT7PacketMapping {
         public static let lastLapTime = 0x7C           // Int32 (milliseconds, -1 sentinel)
         public static let timeOfDayProgression = 0x80  // Int32 (milliseconds)
         public static let racePosition = 0x8C          // Int16 (position on track)
-        public static let totalCars = 0x8E             // Int16 (total cars in session)
+        public static let sessionFlags = 0x8E          // UInt16 (candidate session-state bitmask)
     }
 
     // MARK: - 5. Driver Inputs & Transmission (0x90 - 0x93)

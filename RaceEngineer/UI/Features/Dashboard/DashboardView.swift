@@ -24,7 +24,55 @@ public struct DashboardView: View {
                 } else {
                     portraitLayout
                 }
+
+                if viewModel.sessionPhase != .driving {
+                    sessionPhaseBanner
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                }
             }
+        }
+    }
+
+    private var sessionPhaseBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: sessionPhaseIcon)
+            Text(sessionPhaseTitle)
+                .font(TelemetryTypography.label)
+        }
+        .foregroundStyle(sessionPhaseColor)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(sessionPhaseColor.opacity(0.12))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(sessionPhaseColor.opacity(0.35), lineWidth: 1))
+    }
+
+    private var sessionPhaseTitle: String {
+        switch viewModel.sessionPhase {
+        case .loading: return "PREPARING SESSION"
+        case .preSession: return "AWAITING START"
+        case .paused: return "PAUSED"
+        case .driving: return ""
+        }
+    }
+
+    private var sessionPhaseIcon: String {
+        switch viewModel.sessionPhase {
+        case .loading: return "hourglass"
+        case .preSession: return "flag"
+        case .paused: return "pause.fill"
+        case .driving: return ""
+        }
+    }
+
+    private var sessionPhaseColor: Color {
+        switch viewModel.sessionPhase {
+        case .loading: return .yellow
+        case .preSession: return .orange
+        case .paused: return .yellow
+        case .driving: return .green
         }
     }
 

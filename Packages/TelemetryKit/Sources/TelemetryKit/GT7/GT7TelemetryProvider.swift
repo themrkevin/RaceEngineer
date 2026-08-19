@@ -189,7 +189,7 @@ public actor GT7TelemetryProvider: TelemetryProvider, TelemetryRecordable {
                         diagnostics.hasLoggedFirstPacket = true
                     }
                     let rawFlags = String(format: "%04X", packet.rawSessionFlags)
-                    logger.info("🔎 First valid packet: seq=\(packet.packetSequence), cars=\(packet.totalCars), paused=\(packet.isGamePaused), rawFlags=0x\(rawFlags)")
+                    logger.info("🔎 First valid packet: seq=\(packet.packetSequence), onTrack=\(packet.isCarOnTrack), paused=\(packet.isGamePaused), loading=\(packet.isLoading), rawFlags=0x\(rawFlags)")
                 } else if diagnostics.validPacketCount % 600 == 0 {
                     logger.info("🔎 Packet checkpoint: valid=\(diagnostics.validPacketCount), paused=\(diagnostics.pausedPacketCount), seq=\(packet.packetSequence)")
                 }

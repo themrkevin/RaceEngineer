@@ -15,6 +15,7 @@ public class TelemetryViewModel {
     public var tires: TireState = .cold
     public var timing: LapTimingState = .empty
     public var carCode: Int32? = nil
+    public var sessionPhase: GT7SessionPhase = .preSession
 
     // MARK: - 2. Connection & Telemetry Status
     public var isConnected = false
@@ -134,6 +135,7 @@ public class TelemetryViewModel {
             isConnected = false
             isConnecting = false
             isRecording = false
+            sessionPhase = .preSession
             logger.info("⏹️ Telemetry disconnected by user")
         }
     }
@@ -179,6 +181,9 @@ public class TelemetryViewModel {
     // MARK: - 60Hz Snapshot Updates
 
     private func update(with packet: TelemetryPacket) {
+        if let packet = packet as? GT7Packet {
+            self.sessionPhase = packet.sessionPhase
+        }
         receivedPacketCount += 1
         if receivedPacketCount == 1 || receivedPacketCount % 600 == 0 {
             logger.info("📱 ViewModel packet checkpoint: received=\(self.receivedPacketCount), rpm=\(packet.engineRPM), speed=\(packet.speedMph)")

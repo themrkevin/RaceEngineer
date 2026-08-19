@@ -54,6 +54,10 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let racePosition: Int
     public let totalCars: Int
     public let currentLapTime: TimeInterval?
+    public let sessionFlags: GT7SessionFlags
+    public var sessionPhase: GT7SessionPhase { sessionFlags.phase }
+    public var isCarOnTrack: Bool { sessionFlags.isCarOnTrack }
+    public var isLoading: Bool { sessionFlags.isLoading }
     public let isGamePaused: Bool
     public let inPitLane: Bool
     public let rawSessionFlags: UInt16
@@ -112,6 +116,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
             self.racePosition = 0
             self.totalCars = 0
             self.currentLapTime = nil
+            self.sessionFlags = GT7SessionFlags(rawValue: 0)
             self.isGamePaused = false
             self.inPitLane = false
             self.rawSessionFlags = 0
@@ -214,14 +219,17 @@ public struct GT7Packet: TelemetryPacket, Sendable {
         self.lastLapTime = (lastMillis > 0 && lastMillis != -1) ? TimeInterval(lastMillis) / 1000.0 : nil
 
         self.racePosition = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.racePosition)))
-        self.totalCars = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.totalCars)))
+        // 0x8E is currently treated as session flags. The total-car offset is
+        // not verified independently and must not be derived from this word.
+        self.totalCars = 0
         self.currentLapTime = nil
 
-        // Session Flags (Offset 0x8E - UInt16)
-        let flags = data.readUInt16(at: 0x8E)
+        // Session flags (offset 0x8E - UInt16)
+        let flags = data.readUInt16(at: GT7PacketMapping.Session.sessionFlags)
+        self.sessionFlags = GT7SessionFlags(rawValue: flags)
         self.rawSessionFlags = flags
-        self.isGamePaused = (flags & 0x0001) != 0
-        self.inPitLane = (flags & 0x0010) != 0
+        self.isGamePaused = self.sessionFlags.isGamePaused
+        self.inPitLane = false
 
         // 6. Extended Channels
         let rawCarCode = data.readInt32(at: GT7PacketMapping.Extended.carCode)
