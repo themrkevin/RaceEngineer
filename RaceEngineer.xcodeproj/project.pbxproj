@@ -13,7 +13,7 @@
 		E0757B73302E4BC3000238C7 /* RaceEngineerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0757B72302E4BC3000238C7 /* RaceEngineerTests.swift */; };
 		E0757B7D302E4BC3000238C7 /* RaceEngineerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0757B7C302E4BC3000238C7 /* RaceEngineerUITests.swift */; };
 		E0757B7F302E4BC3000238C7 /* RaceEngineerUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0757B7E302E4BC3000238C7 /* RaceEngineerUITestsLaunchTests.swift */; };
-		E08B7877302F921D00AA3660 /* TelemetryKit in Frameworks */ = {isa = PBXBuildFile; productRef = E08B7876302F921D00AA3660 /* TelemetryKit */; };
+		E0889D323033E0780081D8DA /* TelemetryKit in Frameworks */ = {isa = PBXBuildFile; productRef = E0889D313033E0780081D8DA /* TelemetryKit */; };
 		E08B787F302F92EC00AA3660 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787C302F92EC00AA3660 /* DashboardView.swift */; };
 		E08B7880302F92EC00AA3660 /* ConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787D302F92EC00AA3660 /* ConnectionView.swift */; };
 		E08B7881302F92EC00AA3660 /* TelemetryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */; };
@@ -79,7 +79,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E08B7877302F921D00AA3660 /* TelemetryKit in Frameworks */,
+				E0889D323033E0780081D8DA /* TelemetryKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -168,14 +168,6 @@
 			path = UI;
 			sourceTree = "<group>";
 		};
-		E08B78AC302FA30000AA3660 /* AppState */ = {
-			isa = PBXGroup;
-			children = (
-				E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */,
-			);
-			path = AppState;
-			sourceTree = "<group>";
-		};
 		E08B78A6302FA20000AA3660 /* Models */ = {
 			isa = PBXGroup;
 			children = (
@@ -211,6 +203,27 @@
 			path = Components;
 			sourceTree = "<group>";
 		};
+		E08B78AB302FA20000AA3660 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				E08B789A302FA20000AA3660 /* RPMGaugeWidget.swift */,
+				E08B789C302FA20000AA3660 /* SpeedometerWidget.swift */,
+				E08B789E302FA20000AA3660 /* TireMatrixWidget.swift */,
+				E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */,
+				E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */,
+				E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		E08B78AC302FA30000AA3660 /* AppState */ = {
+			isa = PBXGroup;
+			children = (
+				E08B787E302F92EC00AA3660 /* TelemetryViewModel.swift */,
+			);
+			path = AppState;
+			sourceTree = "<group>";
+		};
 		E08B78AD302FA30000AA3660 /* Features */ = {
 			isa = PBXGroup;
 			children = (
@@ -237,19 +250,6 @@
 			path = Dashboard;
 			sourceTree = "<group>";
 		};
-		E08B78AB302FA20000AA3660 /* Widgets */ = {
-			isa = PBXGroup;
-			children = (
-				E08B789A302FA20000AA3660 /* RPMGaugeWidget.swift */,
-				E08B789C302FA20000AA3660 /* SpeedometerWidget.swift */,
-				E08B789E302FA20000AA3660 /* TireMatrixWidget.swift */,
-				E08B78A0302FA20000AA3660 /* PedalClusterWidget.swift */,
-				E08B78A2302FA20000AA3660 /* FluidTempsWidget.swift */,
-				E08B78A4302FA20000AA3660 /* LapTimingWidget.swift */,
-			);
-			path = Widgets;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -267,7 +267,7 @@
 			);
 			name = RaceEngineer;
 			packageProductDependencies = (
-				E08B7876302F921D00AA3660 /* TelemetryKit */,
+				E0889D313033E0780081D8DA /* TelemetryKit */,
 			);
 			productName = RaceEngineer;
 			productReference = E0757B5E302E4BBF000238C7 /* RaceEngineer.app */;
@@ -342,7 +342,7 @@
 			);
 			mainGroup = E0757B55302E4BBE000238C7;
 			packageReferences = (
-				E08B7875302F921D00AA3660 /* XCLocalSwiftPackageReference "RaceEngineer/Packages/TelemetryKit" */,
+				E0889D303033E0780081D8DA /* XCLocalSwiftPackageReference "Packages/TelemetryKit" */,
 			);
 			productRefGroup = E0757B5F302E4BBF000238C7 /* Products */;
 			projectDirPath = "";
@@ -740,14 +740,14 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E08B7875302F921D00AA3660 /* XCLocalSwiftPackageReference "RaceEngineer/Packages/TelemetryKit" */ = {
+		E0889D303033E0780081D8DA /* XCLocalSwiftPackageReference "Packages/TelemetryKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = RaceEngineer/Packages/TelemetryKit;
+			relativePath = Packages/TelemetryKit;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		E08B7876302F921D00AA3660 /* TelemetryKit */ = {
+		E0889D313033E0780081D8DA /* TelemetryKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TelemetryKit;
 		};

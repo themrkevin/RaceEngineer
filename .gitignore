@@ -4,6 +4,10 @@
 # Swift Package Manager (SPM)
 # The build cache directory when compiling via CLI or Xcode
 .build/
+.swiftpm/
+**/.swiftpm/
+*.xcodeproj/**/swiftpm/
+*.xcworkspace/**/swiftpm/
 .swiftpm/xcode/package.xcworkspace/
 .swiftpm/configuration/
 # build artifacts
@@ -29,3 +33,14 @@ DerivedData/
 *.env.local
 *.p12
 *.mobileprovision
+
+# Fastlane artifacts
+fastlane/test_output/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+**/test_output/
+*.xcresult
+*.xcresult/
+.bundle/
+vendor/bundle/
