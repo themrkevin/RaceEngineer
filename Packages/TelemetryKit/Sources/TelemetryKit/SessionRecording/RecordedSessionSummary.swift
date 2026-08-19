@@ -1,7 +1,7 @@
 import Foundation
 
 public struct RecordedSessionSummary: Identifiable, Hashable, Sendable {
-    public let id: UUID
+    public var id: String { fileURL.path }
     public let fileURL: URL
     public let fileName: String
     public let creationDate: Date
@@ -10,7 +10,6 @@ public struct RecordedSessionSummary: Identifiable, Hashable, Sendable {
     public let duration: TimeInterval
 
     public init(fileURL: URL) {
-        self.id = UUID()
         self.fileURL = fileURL
         self.fileName = fileURL.lastPathComponent
 

@@ -119,10 +119,64 @@ final class SessionRecordingTests: XCTestCase {
         try corruptData.write(to: corruptedURL)
 
         let provider = RecordedSessionProvider(fileURL: corruptedURL)
-        
+        let stream = provider.telemetryStream()
+
+        let readTask = Task<Int, Never> {
+            var count = 0
+            for await _ in stream {
+                count += 1
+            }
+            return count
+        }
+
         try await provider.start()
+        let receivedCount = await readTask.value
         await provider.stop()
         
-        XCTAssertTrue(true, "Corrupted file handled safely without crashing")
+        XCTAssertEqual(receivedCount, 0, "Corrupted file should finish stream without yielding invalid packets")
+    }
+
+    func testRaceFileHeaderSerializationAndValidation() {
+        let header = RaceFileHeader(
+            version: 1,
+            packetSize: 368,
+            sampleRate: 60,
+            flags: 0,
+            reserved: 0
+        )
+
+        XCTAssertTrue(header.isValid)
+
+        let serialized = header.serialize()
+        XCTAssertEqual(serialized.count, 16)
+
+        let deserialized = RaceFileHeader.deserialize(from: serialized)
+        XCTAssertNotNil(deserialized)
+        XCTAssertEqual(deserialized, header)
+        XCTAssertEqual(deserialized?.packetSize, 368)
+        XCTAssertEqual(deserialized?.sampleRate, 60)
+    }
+
+    func testRecordedSessionSummaryMetadata() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("summary_test.race")
+        let recorder = TelemetryRecorder()
+
+        try await recorder.startRecording(to: fileURL)
+
+        // 120 frames at 60Hz = 2.0 seconds
+        let frameCount = 120
+        for _ in 1...frameCount {
+            let frame = makeMockFrame(rpm: 4000.0)
+            await recorder.recordFrame(frame)
+        }
+        await recorder.stopRecording()
+
+        let summary = RecordedSessionSummary(fileURL: fileURL)
+
+        XCTAssertEqual(summary.id, fileURL.path, "Summary id must be deterministic based on fileURL")
+        XCTAssertEqual(summary.fileName, "summary_test.race")
+        XCTAssertEqual(summary.totalFrames, 120)
+        XCTAssertEqual(summary.duration, 2.0, accuracy: 0.05)
+        XCTAssertEqual(summary.formattedDuration, "00:02")
     }
 }

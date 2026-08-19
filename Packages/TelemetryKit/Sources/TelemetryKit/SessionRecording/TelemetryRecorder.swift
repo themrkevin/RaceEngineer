@@ -1,8 +1,8 @@
 import Foundation
 import OSLog
 
-public final class TelemetryRecorder: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "com.raceengineer.recorder.queue", qos: .utility)
+/// Handles high-performance 60Hz telemetry recording to .race binary files with zero hot-path allocations.
+public actor TelemetryRecorder {
     private let logger = Logger(subsystem: "com.raceengineer", category: "TelemetryRecorder")
 
     // State Tracking
@@ -11,18 +11,71 @@ public final class TelemetryRecorder: @unchecked Sendable {
     private var isPaused = false
     private var currentFileURL: URL?
     private var fileHandle: FileHandle?
-    private var watchdogTimer: DispatchSourceTimer?
+    
+    private var lastPacketTimestamp = ContinuousClock.now
+    private var processingTask: Task<Void, Never>?
+    private var watchdogTask: Task<Void, Never>?
 
+    // Disk Write Batching (reduces disk write syscalls by 30x)
+    private var writeBuffer = Data()
+    private static let maxBufferedBytes = 368 * 30 // Flush every 30 frames (~0.5s)
+
+    // Reactive State Stream
     private var stateContinuation: AsyncStream<RecordingState>.Continuation?
     public let stateStream: AsyncStream<RecordingState>
 
+    // Ingress Stream for Non-Blocking 60Hz Direct Yields
+    private let frameContinuation: AsyncStream<(Data, Bool)>.Continuation
+
+    // Static Date Formatter
+    private static let fileNameDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd'T'HH-mm-ss"
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
     public init() {
-        var localContinuation: AsyncStream<RecordingState>.Continuation?
+        var localStateContinuation: AsyncStream<RecordingState>.Continuation?
         self.stateStream = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            localContinuation = continuation
+            continuation.yield(.idle)
+            localStateContinuation = continuation
         }
-        self.stateContinuation = localContinuation
-        broadcastState()
+        self.stateContinuation = localStateContinuation
+
+        var localFrameContinuation: AsyncStream<(Data, Bool)>.Continuation!
+        let frameStream = AsyncStream<(Data, Bool)>(bufferingPolicy: .bufferingNewest(120)) { continuation in
+            localFrameContinuation = continuation
+        }
+        self.frameContinuation = localFrameContinuation
+
+        self.processingTask = nil
+        self.watchdogTask = nil
+
+        // Start background actor loops cleanly after properties are initialized
+        Task { [weak self, frameStream] in
+            await self?.startBackgroundLoops(frameStream: frameStream)
+        }
+    }
+
+    private func startBackgroundLoops(frameStream: AsyncStream<(Data, Bool)>) {
+        self.processingTask = Task { [weak self] in
+            guard let self else { return }
+            await self.processFrameLoop(stream: frameStream)
+        }
+
+        self.watchdogTask = Task { [weak self] in
+            guard let self else { return }
+            await self.watchdogMonitorLoop()
+        }
+    }
+
+    deinit {
+        processingTask?.cancel()
+        watchdogTask?.cancel()
+        frameContinuation.finish()
+        stateContinuation?.finish()
     }
 
     // MARK: - Reactive Stream
@@ -39,73 +92,104 @@ public final class TelemetryRecorder: @unchecked Sendable {
     // MARK: - Configuration & Public API
 
     public func setAutoRecordingEnabled(_ enabled: Bool) {
-        queue.async {
-            self.isAutoRecordingEnabled = enabled
-            if !enabled && self.isRecording {
+        self.isAutoRecordingEnabled = enabled
+        if !enabled && self.isRecording {
+            self.performStopRecording()
+        }
+    }
+
+    public func startManualRecording() throws -> URL {
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let timestamp = Self.fileNameDateFormatter.string(from: Date())
+        let fileURL = docs.appendingPathComponent("GT7_Manual_\(timestamp).race")
+
+        try self.performStartRecording(to: fileURL)
+        return fileURL
+    }
+
+    public func startRecording(to fileURL: URL) throws {
+        try self.performStartRecording(to: fileURL)
+    }
+
+    public func stopRecording() {
+        self.performStopRecording()
+    }
+
+    // MARK: - 60Hz Non-Allocating Ingress (nonisolated)
+
+    /// Synchronously yields frames directly from UDP network receive callback with zero allocations.
+    nonisolated public func processFrameDirect(rawData: Data, isGamePaused: Bool) {
+        frameContinuation.yield((rawData, isGamePaused))
+    }
+
+    /// Direct frame recording helper for testing.
+    public func recordFrame(_ rawData: Data, isGamePaused: Bool = false) {
+        processSingleFrame(rawData: rawData, isGamePaused: isGamePaused)
+    }
+
+    // MARK: - Processing & Watchdog Loops
+
+    private func processFrameLoop(stream: AsyncStream<(Data, Bool)>) async {
+        for await (data, isPaused) in stream {
+            if Task.isCancelled { break }
+            processSingleFrame(rawData: data, isGamePaused: isPaused)
+        }
+    }
+
+    private func processSingleFrame(rawData: Data, isGamePaused: Bool) {
+        guard self.isAutoRecordingEnabled || self.isRecording else { return }
+
+        self.lastPacketTimestamp = ContinuousClock.now
+
+        if isGamePaused {
+            if !self.isPaused {
+                self.isPaused = true
+                self.flushBuffer()
+                self.broadcastState()
+                self.logger.info("⏸️ Telemetry recording suspended (Paused).")
+            }
+            return
+        }
+
+        if self.isPaused {
+            self.isPaused = false
+            self.broadcastState()
+            self.logger.info("▶️ Telemetry recording resumed.")
+        }
+
+        if !self.isRecording {
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let timestamp = Self.fileNameDateFormatter.string(from: Date())
+            let fileURL = docs.appendingPathComponent("GT7_Session_\(timestamp).race")
+            try? self.performStartRecording(to: fileURL)
+        }
+
+        // Buffer frame into contiguous memory
+        self.writeBuffer.append(rawData)
+
+        if self.writeBuffer.count >= Self.maxBufferedBytes {
+            self.flushBuffer()
+        }
+    }
+
+    private func watchdogMonitorLoop() async {
+        let clock = ContinuousClock()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(1))
+            if self.isRecording && (clock.now - self.lastPacketTimestamp) > .seconds(3.5) {
+                self.logger.info("🏁 Packet stream ended. Auto-sealing file.")
                 self.performStopRecording()
             }
         }
     }
 
-    public func startManualRecording() async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do {
-                    let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                    let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                    let fileURL = docs.appendingPathComponent("GT7_Manual_\(timestamp).race")
-                    
-                    try self.performStartRecording(to: fileURL)
-                    continuation.resume(returning: fileURL)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+    // MARK: - File I/O (Actor-Isolated)
+
+    private func flushBuffer() {
+        guard !writeBuffer.isEmpty, let handle = fileHandle else { return }
+        try? handle.write(contentsOf: writeBuffer)
+        writeBuffer.removeAll(keepingCapacity: true)
     }
-
-    public func stopRecording() {
-        queue.async {
-            self.performStopRecording()
-        }
-    }
-
-    // MARK: - 60Hz Non-Allocating Hot Path Ingress
-
-    /// Synchronously consumes frames directly on the UDP receive queue with zero heap allocations.
-    public func processFrameDirect(rawData: Data, isGamePaused: Bool) {
-        queue.async {
-            guard self.isAutoRecordingEnabled || self.isRecording else { return }
-
-            self.resetWatchdog()
-
-            if isGamePaused {
-                if !self.isPaused {
-                    self.isPaused = true
-                    self.broadcastState()
-                    self.logger.info("⏸️ Telemetry recording suspended (Paused).")
-                }
-                return
-            }
-
-            if self.isPaused {
-                self.isPaused = false
-                self.broadcastState()
-                self.logger.info("▶️ Telemetry recording resumed.")
-            }
-
-            if !self.isRecording {
-                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let fileURL = docs.appendingPathComponent("GT7_Session_\(timestamp).race")
-                try? self.performStartRecording(to: fileURL)
-            }
-
-            self.fileHandle?.write(rawData)
-        }
-    }
-
-    // MARK: - File I/O (Queue-Confined)
 
     private func performStartRecording(to fileURL: URL) throws {
         performStopRecording()
@@ -114,25 +198,19 @@ public final class TelemetryRecorder: @unchecked Sendable {
         FileManager.default.createFile(atPath: fileURL.path, contents: nil)
         let handle = try FileHandle(forWritingTo: fileURL)
 
-        var header = Data()
-        var magic: UInt32 = 0x52414345         // "RACE"
-        var version: UInt16 = 1                // v1
-        var packetSize: UInt16 = 368           // 368 bytes
-        var sampleRate: UInt16 = 60            // 60Hz
-        var flags: UInt16 = 0
-        var reserved: UInt32 = 0
+        // Write normalized 16-byte header
+        let header = RaceFileHeader(
+            version: RaceFileHeader.currentVersion,
+            packetSize: RaceFileHeader.standardPacketSize,
+            sampleRate: RaceFileHeader.standardSampleRate
+        )
+        try handle.write(contentsOf: header.serialize())
 
-        header.append(Data(bytes: &magic, count: 4))
-        header.append(Data(bytes: &version, count: 2))
-        header.append(Data(bytes: &packetSize, count: 2))
-        header.append(Data(bytes: &sampleRate, count: 2))
-        header.append(Data(bytes: &flags, count: 2))
-        header.append(Data(bytes: &reserved, count: 4))
-
-        handle.write(header)
         self.fileHandle = handle
+        self.writeBuffer.removeAll(keepingCapacity: true)
         self.isRecording = true
         self.isPaused = false
+        self.lastPacketTimestamp = ContinuousClock.now
         broadcastState()
 
         logger.info("🔴 Session recording started: \(fileURL.lastPathComponent)")
@@ -141,8 +219,7 @@ public final class TelemetryRecorder: @unchecked Sendable {
     private func performStopRecording() {
         guard isRecording else { return }
 
-        watchdogTimer?.cancel()
-        watchdogTimer = nil
+        flushBuffer()
 
         try? fileHandle?.synchronize()
         try? fileHandle?.close()
@@ -154,55 +231,6 @@ public final class TelemetryRecorder: @unchecked Sendable {
 
         if let url = currentFileURL {
             logger.info("⏹️ Session saved cleanly to: \(url.lastPathComponent)")
-        }
-    }
-
-    private func resetWatchdog() {
-        watchdogTimer?.cancel()
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + .milliseconds(3500))
-        timer.setEventHandler { [weak self] in
-            guard let self, self.isRecording else { return }
-            self.logger.info("🏁 Packet stream ended. Auto-sealing file.")
-            self.performStopRecording()
-        }
-        timer.resume()
-        self.watchdogTimer = timer
-    }
-    
-    // MARK: - Testing & Direct File Controls
-
-    /// Starts recording explicitly to a target file URL (used in tests and custom exports).
-    public func startRecording(to fileURL: URL) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
-                do {
-                    try self.performStartRecording(to: fileURL)
-                    continuation.resume()
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    /// Direct frame recording helper for testing.
-    public func recordFrame(_ rawData: Data, isGamePaused: Bool = false) async {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                self.processFrameDirect(rawData: rawData, isGamePaused: isGamePaused)
-                continuation.resume()
-            }
-        }
-    }
-
-    /// Stops recording asynchronously ensuring all queued disk writes are flushed.
-    public func stopRecording() async {
-        await withCheckedContinuation { continuation in
-            queue.async {
-                self.performStopRecording()
-                continuation.resume()
-            }
         }
     }
 }

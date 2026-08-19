@@ -59,43 +59,60 @@ public actor RecordedSessionProvider: TelemetryProvider {
 
         guard let handle = try? FileHandle(forReadingFrom: fileURL) else {
             logger.error("❌ Cannot open recording at path: \(self.fileURL.path)")
+            streamContinuation?.finish()
             return
         }
 
-        // Validate 16-byte header magic ("RACE" / 0x52414345)
-        guard let headerData = try? handle.read(upToCount: 16),
-              headerData.count == 16,
-              headerData.withUnsafeBytes({ $0.loadUnaligned(fromByteOffset: 0, as: UInt32.self) }) == 0x52414345 else {
+        // Validate 16-byte header magic and format
+        guard let headerData = try? handle.read(upToCount: RaceFileHeader.headerSize),
+              headerData.count == RaceFileHeader.headerSize,
+              let header = RaceFileHeader.deserialize(from: headerData),
+              header.isValid else {
             logger.error("❌ Corrupt or invalid .race file header at: \(self.fileURL.lastPathComponent)")
             try? handle.close()
             streamContinuation?.finish()
             return
         }
 
-        logger.info("▶️ Starting playback from \(self.fileURL.lastPathComponent) at \(self.playbackSpeed)x speed")
+        let packetSize = Int(header.packetSize)
+        let sampleRate = Double(header.sampleRate)
+        let effectivePlaybackSpeed = self.playbackSpeed
 
-        // 60Hz default frame cadence: ~16,666,667 nanoseconds
-        let frameIntervalNanoseconds = UInt64(16_666_667.0 / playbackSpeed)
-        guard let continuation = self.streamContinuation else { return }
+        logger.info("▶️ Starting playback from \(self.fileURL.lastPathComponent) at \(self.playbackSpeed)x speed (\(sampleRate)Hz, \(packetSize) bytes/packet)")
+
+        guard let continuation = self.streamContinuation else {
+            try? handle.close()
+            return
+        }
 
         playbackTask = Task.detached(priority: .userInitiated) { [weak self] in
-            defer { try? handle.close() }
+            defer {
+                try? handle.close()
+                continuation.finish()
+                self?.logger.info("🏁 Session playback finished.")
+            }
+
+            let clock = ContinuousClock()
+            let intervalNanoseconds = Int64(1_000_000_000.0 / (sampleRate * effectivePlaybackSpeed))
+            let interval = Duration.nanoseconds(intervalNanoseconds)
+            var targetTime = clock.now
 
             while !Task.isCancelled {
-                guard let frameBuffer = try? handle.read(upToCount: 368),
-                      frameBuffer.count == 368 else {
+                guard let frameBuffer = try? handle.read(upToCount: packetSize),
+                      frameBuffer.count == packetSize else {
                     break // End of stream reached
                 }
 
-                // Ingress through your existing single-pass parser
+                // Ingress through single-pass packet parser
                 let packet = GT7Packet(decryptedData: frameBuffer)
                 continuation.yield(packet)
 
-                try? await Task.sleep(nanoseconds: frameIntervalNanoseconds)
+                targetTime += interval
+                let sleepDuration = targetTime - clock.now
+                if sleepDuration > .zero {
+                    try? await Task.sleep(for: sleepDuration)
+                }
             }
-
-            continuation.finish()
-            self?.logger.info("🏁 Session playback finished.")
         }
     }
 

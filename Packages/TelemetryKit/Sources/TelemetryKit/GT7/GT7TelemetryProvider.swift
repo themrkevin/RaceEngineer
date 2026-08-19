@@ -40,7 +40,7 @@ public actor GT7TelemetryProvider: TelemetryProvider {
     }
 
     public func setAutoRecordingEnabled(_ enabled: Bool) async {
-        recorder.setAutoRecordingEnabled(enabled)
+        await recorder.setAutoRecordingEnabled(enabled)
     }
 
     public func startManualRecording() async throws -> URL {
