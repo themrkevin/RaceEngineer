@@ -54,6 +54,8 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let racePosition: Int
     public let totalCars: Int
     public let currentLapTime: TimeInterval?
+    public let isGamePaused: Bool
+    public let inPitLane: Bool
     
     // 6. Extended Dynamics & Tuning Channels
     public let steeringAngle: Float
@@ -65,7 +67,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let wheelbase: Float
     
     public var debugDescription: String {
-        "GT7Packet(Speed: \(Int(speedMph)) MPH, RPM: \(Int(engineRPM)), Lap: \(currentLapNumber), Pos: \(racePosition)/\(totalCars))"
+        "GT7Packet(Speed: \(Int(speedMph)) MPH, RPM: \(Int(engineRPM)), Lap: \(currentLapNumber), Pos: \(racePosition)/\(totalCars), Paused: \(isGamePaused))"
     }
 
     // MARK: - Initializer (Single-Pass Ingress Parser)
@@ -109,6 +111,8 @@ public struct GT7Packet: TelemetryPacket, Sendable {
             self.racePosition = 0
             self.totalCars = 0
             self.currentLapTime = nil
+            self.isGamePaused = false
+            self.inPitLane = false
             self.steeringAngle = 0
             self.steeringAngularVelocity = 0
             self.gForce = .zero
@@ -211,6 +215,11 @@ public struct GT7Packet: TelemetryPacket, Sendable {
         self.totalCars = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.totalCars)))
         self.currentLapTime = nil
 
+        // Session Flags (Offset 0x8E - UInt16)
+        let flags = data.readUInt16(at: 0x8E)
+        self.isGamePaused = (flags & 0x0001) != 0
+        self.inPitLane = (flags & 0x0010) != 0
+
         // 6. Extended Channels
         let rawCarCode = data.readInt32(at: GT7PacketMapping.Extended.carCode)
         self.carCode = (rawCarCode > 0 && rawCarCode != -1) ? rawCarCode : nil
@@ -235,6 +244,11 @@ fileprivate extension Data {
     func readUInt8(at offset: Int) -> UInt8 {
         guard self.count > offset else { return 0 }
         return self[offset]
+    }
+
+    func readUInt16(at offset: Int) -> UInt16 {
+        guard self.count >= offset + 2 else { return 0 }
+        return self.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) }
     }
     
     func readFloat(at offset: Int) -> Float {

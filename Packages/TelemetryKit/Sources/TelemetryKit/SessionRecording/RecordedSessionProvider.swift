@@ -27,6 +27,33 @@ public actor RecordedSessionProvider: TelemetryProvider {
         return streamInstance
     }
 
+    // MARK: - TelemetryProvider Protocol Conformance (Recording Stubs)
+
+    nonisolated public func recordingStateStream() -> AsyncStream<RecordingState> {
+        AsyncStream { continuation in
+            continuation.yield(.idle)
+            continuation.finish()
+        }
+    }
+
+    public func setAutoRecordingEnabled(_ enabled: Bool) async {
+        // No-op for recorded session playback
+    }
+
+    public func startManualRecording() async throws -> URL {
+        throw NSError(
+            domain: "com.raceengineer.RecordedSessionProvider",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Cannot record during session playback."]
+        )
+    }
+
+    public func stopRecording() async {
+        // No-op for recorded session playback
+    }
+
+    // MARK: - Playback Lifecycle
+
     public func start(ipAddress: String = "") async throws {
         stop()
 

@@ -8,7 +8,7 @@ import TelemetryKit
 public class TelemetryViewModel {
     private let logger = Logger(subsystem: "com.raceengineer", category: "ViewModel")
 
-    // MARK: - Domain-Isolated Value Snapshots (UDF State)
+    // MARK: - 1. Domain Snapshot States (UDF Outputs for Widgets)
     public var motion: MotionState = .idle
     public var engine: EngineState = .idle
     public var inputs: DriverInputState = .idle
@@ -16,12 +16,27 @@ public class TelemetryViewModel {
     public var timing: LapTimingState = .empty
     public var carCode: Int32? = nil
 
-    // MARK: - Connection & Session State
+    // MARK: - 2. Connection & Telemetry Status
     public var isConnected = false
     public var isConnecting = false
     public var connectionError: String?
 
-    // MARK: - Backward-Compatibility Accessors
+    // MARK: - 3. Session Recording Status (Engine Outputs)
+    public var isRecording = false
+    public var isRecordingPaused = false
+    public var lastSavedFileURL: URL?
+
+    // MARK: - 4. Driver Settings & Configuration (UI Inputs)
+    public var isAutoRecordingEnabled = false {
+        didSet {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.provider?.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
+            }
+        }
+    }
+
+    // MARK: - 5. Backward-Compatibility Accessors
     public var speedKmh: Float { motion.speedKmh }
     public var speedMph: Float { motion.speedMph }
     public var engineRPM: Float { engine.rpm }
@@ -36,10 +51,12 @@ public class TelemetryViewModel {
     public var fuelCapacity: Float { engine.fuelCapacity }
     public var currentLapNumber: Int { timing.currentLapNumber }
 
-    // MARK: - Infrastructure & Transport
+    // MARK: - 6. Infrastructure & Active Tasks
     private var provider: (any TelemetryProvider)?
     private var streamTask: Task<Void, Never>?
+    private var recordingStateTask: Task<Void, Never>?
 
+    // MARK: - Lifecycle
     public init(provider: (any TelemetryProvider)? = nil) {
         self.provider = provider
     }
@@ -56,18 +73,31 @@ public class TelemetryViewModel {
 
         Task {
             do {
+                await selectedProvider.setAutoRecordingEnabled(self.isAutoRecordingEnabled)
                 try await selectedProvider.start(ipAddress: ipAddress)
                 self.isConnected = true
                 self.isConnecting = false
                 self.logger.info("✅ Telemetry provider connected to \(ipAddress)")
 
-                // Start listening to stream
+                // 1. Observe 60Hz telemetry stream
                 self.streamTask?.cancel()
                 self.streamTask = Task { [weak self] in
-                    let stream = selectedProvider.telemetryStream()
-                    for await packet in stream {
+                    for await packet in selectedProvider.telemetryStream() {
                         if Task.isCancelled { break }
                         self?.update(with: packet)
+                    }
+                }
+
+                // 2. Observe recording state reactively (no manual state flags)
+                self.recordingStateTask?.cancel()
+                self.recordingStateTask = Task { [weak self] in
+                    for await state in selectedProvider.recordingStateStream() {
+                        if Task.isCancelled { break }
+                        self?.isRecording = state.isRecording
+                        self?.isRecordingPaused = state.isPaused
+                        if let url = state.currentFileURL {
+                            self?.lastSavedFileURL = url
+                        }
                     }
                 }
             } catch {
@@ -84,16 +114,33 @@ public class TelemetryViewModel {
             await provider?.stop()
             streamTask?.cancel()
             streamTask = nil
+            recordingStateTask?.cancel()
+            recordingStateTask = nil
             isConnected = false
             isConnecting = false
+            isRecording = false
             logger.info("⏹️ Telemetry disconnected by user")
         }
     }
 
-    // MARK: - 60Hz Hot Path Snapshot Updates
+    public func toggleManualRecording() {
+        Task {
+            guard let provider else { return }
+            if isRecording {
+                await provider.stopRecording()
+            } else {
+                do {
+                    _ = try await provider.startManualRecording()
+                } catch {
+                    self.logger.error("Failed to start manual recording: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    // MARK: - 60Hz Snapshot Updates
 
     private func update(with packet: TelemetryPacket) {
-        // Construct stack-allocated value types with zero heap allocation
         self.carCode = packet.carCode
 
         self.motion = MotionState(
@@ -105,7 +152,7 @@ public class TelemetryViewModel {
 
         self.engine = EngineState(
             rpm: packet.engineRPM,
-            maxRPM: 8500, // Normalized default rev limit
+            maxRPM: 8500,
             oilTemp: packet.oilTemp,
             waterTemp: packet.waterTemp,
             fuelLevel: packet.fuelLevel,
