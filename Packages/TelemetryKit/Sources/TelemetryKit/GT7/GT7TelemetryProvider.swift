@@ -126,6 +126,14 @@ public actor GT7TelemetryProvider: TelemetryProvider, TelemetryRecordable {
 
     private func handleListenerState(_ state: NWListener.State) {
         logger.info("👂 Listener State: \(String(describing: state))")
+
+        // A real transport failure is the legitimate signal to seal an in-progress recording
+        // UDP has no peer-disconnect signal, packet-timing gaps should not trigger this.
+        if case .failed(let error) = state {
+            // TODO: we can add a way to notify user of interruption
+            logger.error("❌ Listener failed: \(error.localizedDescription)")
+            Task { await self.recorder.stopRecording() }
+        }
     }
 
     private func handleNewInboundConnection(_ connection: NWConnection) {

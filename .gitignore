@@ -24,9 +24,9 @@ xcuserdata/
 DerivedData/
 
 # Planning & Strategy (Local Only)
-.continue/
-.planning/
 .github/instructions/local-*.md
+docs/plan/
+docs/debug/
 
 # Private Files
 *.env
