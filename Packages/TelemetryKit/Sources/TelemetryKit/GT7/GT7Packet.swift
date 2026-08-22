@@ -54,6 +54,13 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let racePosition: Int
     public let totalCars: Int
     public let currentLapTime: TimeInterval?
+    public let sessionFlags: GT7SessionFlags
+    public var sessionPhase: GT7SessionPhase { sessionFlags.phase }
+    public var isCarOnTrack: Bool { sessionFlags.isCarOnTrack }
+    public var isLoading: Bool { sessionFlags.isLoading }
+    public let isGamePaused: Bool
+    public let inPitLane: Bool
+    public let rawSessionFlags: UInt16
     
     // 6. Extended Dynamics & Tuning Channels
     public let steeringAngle: Float
@@ -65,7 +72,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let wheelbase: Float
     
     public var debugDescription: String {
-        "GT7Packet(Speed: \(Int(speedMph)) MPH, RPM: \(Int(engineRPM)), Lap: \(currentLapNumber), Pos: \(racePosition)/\(totalCars))"
+        "GT7Packet(Speed: \(Int(speedMph)) MPH, RPM: \(Int(engineRPM)), Lap: \(currentLapNumber), Pos: \(racePosition)/\(totalCars), Paused: \(isGamePaused))"
     }
 
     // MARK: - Initializer (Single-Pass Ingress Parser)
@@ -109,6 +116,10 @@ public struct GT7Packet: TelemetryPacket, Sendable {
             self.racePosition = 0
             self.totalCars = 0
             self.currentLapTime = nil
+            self.sessionFlags = GT7SessionFlags(rawValue: 0)
+            self.isGamePaused = false
+            self.inPitLane = false
+            self.rawSessionFlags = 0
             self.steeringAngle = 0
             self.steeringAngularVelocity = 0
             self.gForce = .zero
@@ -208,8 +219,17 @@ public struct GT7Packet: TelemetryPacket, Sendable {
         self.lastLapTime = (lastMillis > 0 && lastMillis != -1) ? TimeInterval(lastMillis) / 1000.0 : nil
 
         self.racePosition = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.racePosition)))
-        self.totalCars = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.totalCars)))
+        // 0x8E is currently treated as session flags. The total-car offset is
+        // not verified independently and must not be derived from this word.
+        self.totalCars = 0
         self.currentLapTime = nil
+
+        // Session flags (offset 0x8E - UInt16)
+        let flags = data.readUInt16(at: GT7PacketMapping.Session.sessionFlags)
+        self.sessionFlags = GT7SessionFlags(rawValue: flags)
+        self.rawSessionFlags = flags
+        self.isGamePaused = self.sessionFlags.isGamePaused
+        self.inPitLane = false
 
         // 6. Extended Channels
         let rawCarCode = data.readInt32(at: GT7PacketMapping.Extended.carCode)
@@ -235,6 +255,11 @@ fileprivate extension Data {
     func readUInt8(at offset: Int) -> UInt8 {
         guard self.count > offset else { return 0 }
         return self[offset]
+    }
+
+    func readUInt16(at offset: Int) -> UInt16 {
+        guard self.count >= offset + 2 else { return 0 }
+        return self.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) }
     }
     
     func readFloat(at offset: Int) -> Float {

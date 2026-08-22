@@ -19,7 +19,7 @@ final class GT7PacketTests: XCTestCase {
         XCTAssertEqual(GT7PacketMapping.Session.bestLapTime, 0x78)
         XCTAssertEqual(GT7PacketMapping.Session.lastLapTime, 0x7C)
         XCTAssertEqual(GT7PacketMapping.Session.racePosition, 0x8C)
-        XCTAssertEqual(GT7PacketMapping.Session.totalCars, 0x8E)
+        XCTAssertEqual(GT7PacketMapping.Session.sessionFlags, 0x8E)
         XCTAssertEqual(GT7PacketMapping.Inputs.gear, 0x90)
         XCTAssertEqual(GT7PacketMapping.Inputs.throttle, 0x91)
         XCTAssertEqual(GT7PacketMapping.Inputs.brake, 0x92)
@@ -56,11 +56,11 @@ final class GT7PacketTests: XCTestCase {
         let bestLapMs: Int32 = 82450
         withUnsafeBytes(of: bestLapMs.littleEndian) { buffer.replaceSubrange(0x78..<0x7C, with: $0) }
 
-        // Position = 2, Total Cars = 16
+        // Position = 2, candidate session flags = 0x01 (car on track)
         let racePos: Int16 = 2
-        let totalCars: Int16 = 16
         withUnsafeBytes(of: racePos.littleEndian) { buffer.replaceSubrange(0x8C..<0x8E, with: $0) }
-        withUnsafeBytes(of: totalCars.littleEndian) { buffer.replaceSubrange(0x8E..<0x90, with: $0) }
+        buffer[0x8E] = 0x01
+        buffer[0x8F] = 0x00
         
         // Gear: 4th gear (0x04) with suggested 5th gear (0x50) -> 0x54
         buffer[0x90] = 0x54
@@ -85,7 +85,12 @@ final class GT7PacketTests: XCTestCase {
         XCTAssertEqual(packet.totalLaps, 10)
         XCTAssertEqual(try XCTUnwrap(packet.bestLapTime), 82.45, accuracy: 0.001)
         XCTAssertEqual(packet.racePosition, 2)
-        XCTAssertEqual(packet.totalCars, 16)
+        XCTAssertEqual(packet.rawSessionFlags, 0x01)
+        XCTAssertTrue(packet.isCarOnTrack)
+        XCTAssertFalse(packet.isGamePaused)
+        XCTAssertFalse(packet.isLoading)
+        XCTAssertTrue(packet.sessionFlags.isActivelyDriving)
+        XCTAssertEqual(packet.totalCars, 0)
         XCTAssertEqual(packet.gear, 4)
         XCTAssertEqual(packet.suggestedGear, 5)
         XCTAssertEqual(packet.throttle, 1.0, accuracy: 0.001)
@@ -106,5 +111,12 @@ final class GT7PacketTests: XCTestCase {
 
         XCTAssertNil(packet.bestLapTime)
         XCTAssertNil(packet.lastLapTime)
+    }
+
+    func testSessionFlagsDeriveExpectedPhases() {
+        XCTAssertEqual(GT7SessionFlags(rawValue: 0x0198).phase, .preSession)
+        XCTAssertEqual(GT7SessionFlags(rawValue: 0x0019).phase, .driving)
+        XCTAssertEqual(GT7SessionFlags(rawValue: 0x0013).phase, .paused)
+        XCTAssertEqual(GT7SessionFlags(rawValue: 0x0005).phase, .loading)
     }
 }

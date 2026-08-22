@@ -9,10 +9,10 @@ public actor MockTelemetryProvider: TelemetryProvider {
         self.continuation = AsyncStream.makeStream(of: TelemetryPacket.self, bufferingPolicy: .bufferingNewest(5))
     }
     
-    nonisolated public func telemetryStream() -> AsyncStream<TelemetryPacket> {
+    public func telemetryStream() async -> AsyncStream<TelemetryPacket> {
         return continuation.stream
     }
-    
+
     public func start(ipAddress: String) async throws {
         stop()
         

@@ -72,6 +72,19 @@ final class SessionRecordingTests: XCTestCase {
         XCTAssertEqual(magic, 0x52414345, "Magic bytes should equal 'RACE' (0x52414345)")
     }
 
+    func testPausedDiagnosticFrameIsStillRecorded() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("paused_frame.race")
+        let recorder = TelemetryRecorder()
+
+        try await recorder.startRecording(to: fileURL)
+        await recorder.recordFrame(makeMockFrame(rpm: 4000.0), isGamePaused: true)
+        await recorder.stopRecording()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let fileSize = try XCTUnwrap(attributes[.size] as? Int64)
+        XCTAssertEqual(fileSize, Int64(RaceFileHeader.headerSize + 368))
+    }
+
     func testEndToEndRecordingAndPlaybackStreaming() async throws {
         let fileURL = tempDirectory.appendingPathComponent("stream_test.race")
         let recorder = TelemetryRecorder()
@@ -87,7 +100,7 @@ final class SessionRecordingTests: XCTestCase {
 
         // High playback speed (500x) for sub-second test execution
         let provider = RecordedSessionProvider(fileURL: fileURL, playbackSpeed: 500.0)
-        let stream = provider.telemetryStream()
+        let stream = await provider.telemetryStream()
 
         // Collector Task that encapsulates mutable state inside its own concurrency boundary
         let collectTask = Task<[Float], Never> {
@@ -109,6 +122,30 @@ final class SessionRecordingTests: XCTestCase {
         XCTAssertEqual(receivedRPMs, expectedRPMs, "Stream did not yield packets in the exact recorded sequence")
     }
 
+    func testPlaybackProviderRejectsRestartAfterStreamFinishes() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("single_use.race")
+        let recorder = TelemetryRecorder()
+        try await recorder.startRecording(to: fileURL)
+        await recorder.recordFrame(makeMockFrame(rpm: 3200.0))
+        await recorder.stopRecording()
+
+        let provider = RecordedSessionProvider(fileURL: fileURL, playbackSpeed: 500.0)
+        let stream = await provider.telemetryStream()
+        let readTask = Task {
+            for await _ in stream {}
+        }
+
+        try await provider.start()
+        await readTask.value
+
+        do {
+            try await provider.start()
+            XCTFail("A finished playback stream should not be restarted")
+        } catch let error as RecordedSessionError {
+            XCTAssertEqual(error, .playbackStreamFinished)
+        }
+    }
+
     func testCorruptedHeaderFailsGracefully() async throws {
         let corruptedURL = tempDirectory.appendingPathComponent("corrupt.race")
         
@@ -119,10 +156,161 @@ final class SessionRecordingTests: XCTestCase {
         try corruptData.write(to: corruptedURL)
 
         let provider = RecordedSessionProvider(fileURL: corruptedURL)
-        
-        try await provider.start()
+        let stream = await provider.telemetryStream()
+
+        let readTask = Task<Int, Never> {
+            var count = 0
+            for await _ in stream {
+                count += 1
+            }
+            return count
+        }
+
+        do {
+            try await provider.start()
+            XCTFail("Corrupted file should throw an invalid header error")
+        } catch let error as RecordedSessionError {
+            XCTAssertEqual(error, .invalidHeader)
+        }
+        let receivedCount = await readTask.value
         await provider.stop()
         
-        XCTAssertTrue(true, "Corrupted file handled safely without crashing")
+        XCTAssertEqual(receivedCount, 0, "Corrupted file should finish stream without yielding invalid packets")
+    }
+
+    func testUnsupportedHeaderFailsBeforePlayback() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("unsupported.race")
+        let header = RaceFileHeader(packetSize: 396)
+        try header.serialize().write(to: fileURL)
+
+        let provider = RecordedSessionProvider(fileURL: fileURL)
+
+        do {
+            try await provider.start()
+            XCTFail("Unsupported packet size should fail before playback")
+        } catch let error as RecordedSessionError {
+            XCTAssertEqual(error, .unsupportedHeader(header))
+        }
+    }
+
+    func testTruncatedPayloadFailsBeforePlayback() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("truncated.race")
+        let header = RaceFileHeader()
+        var data = header.serialize()
+        data.append(makeMockFrame(rpm: 3000.0).prefix(100))
+        try data.write(to: fileURL)
+
+        let provider = RecordedSessionProvider(fileURL: fileURL)
+
+        do {
+            try await provider.start()
+            XCTFail("Truncated payload should fail before playback")
+        } catch let error as RecordedSessionError {
+            XCTAssertEqual(error, .truncatedFrame(expected: 368, actual: 100))
+        }
+    }
+
+    func testRaceFileHeaderSerializationAndValidation() {
+        let header = RaceFileHeader(
+            version: 1,
+            packetSize: 368,
+            sampleRate: 60,
+            flags: 0,
+            reserved: 0
+        )
+
+        XCTAssertTrue(header.isValid)
+
+        let serialized = header.serialize()
+        XCTAssertEqual(serialized.count, 16)
+
+        let deserialized = RaceFileHeader.deserialize(from: serialized)
+        XCTAssertNotNil(deserialized)
+        XCTAssertEqual(deserialized, header)
+        XCTAssertEqual(deserialized?.packetSize, 368)
+        XCTAssertEqual(deserialized?.sampleRate, 60)
+    }
+
+    func testRecordedSessionSummaryMetadata() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("summary_test.race")
+        let recorder = TelemetryRecorder()
+
+        try await recorder.startRecording(to: fileURL)
+
+        // 120 frames at 60Hz = 2.0 seconds
+        let frameCount = 120
+        for _ in 1...frameCount {
+            let frame = makeMockFrame(rpm: 4000.0)
+            await recorder.recordFrame(frame)
+        }
+        await recorder.stopRecording()
+
+        let summary = RecordedSessionSummary(fileURL: fileURL)
+
+        XCTAssertEqual(summary.id, fileURL.path, "Summary id must be deterministic based on fileURL")
+        XCTAssertEqual(summary.fileName, "summary_test.race")
+        XCTAssertEqual(summary.totalFrames, 120)
+        XCTAssertEqual(summary.duration, 2.0, accuracy: 0.05)
+        XCTAssertEqual(summary.formattedDuration, "00:02")
+    }
+
+    func testRecordedSessionLibraryFiltersAndSortsSessions() async throws {
+        let olderURL = tempDirectory.appendingPathComponent("older.race")
+        let newerURL = tempDirectory.appendingPathComponent("newer.RACE")
+        let ignoredURL = tempDirectory.appendingPathComponent("notes.txt")
+
+        try Data(repeating: 0, count: RaceFileHeader.headerSize).write(to: olderURL)
+        try Data(repeating: 0, count: RaceFileHeader.headerSize).write(to: newerURL)
+        try Data("ignore".utf8).write(to: ignoredURL)
+
+        try FileManager.default.setAttributes(
+            [.creationDate: Date(timeIntervalSince1970: 100)],
+            ofItemAtPath: olderURL.path
+        )
+        try FileManager.default.setAttributes(
+            [.creationDate: Date(timeIntervalSince1970: 200)],
+            ofItemAtPath: newerURL.path
+        )
+
+        let library = RecordedSessionLibrary(directoryURL: tempDirectory)
+        let sessions = try await library.sessions()
+
+        XCTAssertEqual(sessions.map(\.fileName), ["newer.RACE", "older.race"])
+    }
+
+    func testRecordedSessionLibraryRejectsMissingDirectory() async throws {
+        let missingURL = tempDirectory.appendingPathComponent("missing")
+        let library = RecordedSessionLibrary(directoryURL: missingURL)
+
+        do {
+            _ = try await library.sessions()
+            XCTFail("A missing recordings directory should throw")
+        } catch let error as RecordedSessionLibrary.LibraryError {
+            XCTAssertEqual(error, .directoryUnavailable(missingURL))
+        }
+    }
+
+    func testHighVolumeIngressPersistsEveryFrame() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("high_volume.race")
+        let recorder = TelemetryRecorder()
+        let frameCount = 2_000
+
+        try await recorder.startRecording(to: fileURL)
+
+        for index in 0..<frameCount {
+            recorder.processFrameDirect(
+                rawData: makeMockFrame(rpm: Float(index)),
+                isGamePaused: false
+            )
+        }
+
+        await recorder.flushIngress()
+        await recorder.stopRecording()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let fileSize = try XCTUnwrap(attributes[.size] as? Int64)
+        let expectedSize = Int64(RaceFileHeader.headerSize + frameCount * 368)
+
+        XCTAssertEqual(fileSize, expectedSize, "Every accepted ingress frame must be persisted")
     }
 }
