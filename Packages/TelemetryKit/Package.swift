@@ -11,11 +11,19 @@ let package = Package(
         .library(
             name: "TelemetryKit",
             targets: ["TelemetryKit"]),
+        .executable(
+            name: "TelemetryKitInspector",
+            targets: ["TelemetryKitInspector"]),
     ],
     targets: [
         .target(
             name: "TelemetryKit",
             path: "Sources/TelemetryKit"
+        ),
+        .executableTarget(
+            name: "TelemetryKitInspector",
+            dependencies: ["TelemetryKit"],
+            path: "Sources/TelemetryKitInspector"
         ),
         .testTarget(
             name: "TelemetryKitTests",
