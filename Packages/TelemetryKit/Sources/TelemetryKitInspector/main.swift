@@ -10,6 +10,7 @@ struct EventReport: Codable {
     let query: QueryReport?
     let events: [EventReportItem]
     let cornerPerformanceWindows: [CornerPerformanceReport]
+    let cornerEvidence: [CornerEvidenceReport]
 }
 
 struct SessionReport: Codable {
@@ -182,6 +183,84 @@ struct CornerPerformanceReport: Codable {
     }
 }
 
+struct CornerEvidenceDomainTagsReport: Codable {
+    let rideControl: String
+    let platformContact: String
+    let gripUtilization: String
+    let suspensionBehavior: String
+    let aeroInfluence: String
+
+    init(_ tags: CornerEvidenceDomainTags) {
+        rideControl = tags.rideControl.rawValue
+        platformContact = tags.platformContact.rawValue
+        gripUtilization = tags.gripUtilization.rawValue
+        suspensionBehavior = tags.suspensionBehavior.rawValue
+        aeroInfluence = tags.aeroInfluence.rawValue
+    }
+}
+
+struct CornerEvidenceReport: Codable {
+    let cornerIndex: Int
+    let lapNumber: Int
+    let anchorLapTimeSeconds: TimeInterval?
+    let anchorSessionTimeSeconds: TimeInterval
+    let entryLapTimeSeconds: TimeInterval?
+    let entrySessionTimeSeconds: TimeInterval
+    let minimumSpeedLapTimeSeconds: TimeInterval?
+    let minimumSpeedSessionTimeSeconds: TimeInterval
+    let exitLapTimeSeconds: TimeInterval?
+    let exitSessionTimeSeconds: TimeInterval
+    let throttlePickupLapTimeSeconds: TimeInterval?
+    let throttlePickupSessionTimeSeconds: TimeInterval?
+    let entrySpeedMetersPerSecond: Float
+    let minimumSpeedMetersPerSecond: Float
+    let exitSpeedMetersPerSecond: Float
+    let speedRecoveryMetersPerSecond: Float
+    let peakLateralCentripetalG: Float
+    let entryGear: Int
+    let minimumSpeedGear: Int
+    let exitGear: Int
+    let entryBrake: Float
+    let exitThrottle: Float
+    let throttlePickupDelaySeconds: TimeInterval?
+    let exitAccelerationEstimateMetersPerSecondSquared: Float
+    let isPossibleCorner: Bool
+    let evidenceConfidence: Float
+    let domainTags: CornerEvidenceDomainTagsReport
+    let dataWarnings: [String]
+
+    init(_ evidence: CornerEvidence) {
+        cornerIndex = evidence.cornerIndex
+        lapNumber = evidence.lapNumber
+        anchorLapTimeSeconds = evidence.anchorLapTimeSeconds
+        anchorSessionTimeSeconds = evidence.anchorSessionTimeSeconds
+        entryLapTimeSeconds = evidence.entryLapTimeSeconds
+        entrySessionTimeSeconds = evidence.entrySessionTimeSeconds
+        minimumSpeedLapTimeSeconds = evidence.minimumSpeedLapTimeSeconds
+        minimumSpeedSessionTimeSeconds = evidence.minimumSpeedSessionTimeSeconds
+        exitLapTimeSeconds = evidence.exitLapTimeSeconds
+        exitSessionTimeSeconds = evidence.exitSessionTimeSeconds
+        throttlePickupLapTimeSeconds = evidence.throttlePickupLapTimeSeconds
+        throttlePickupSessionTimeSeconds = evidence.throttlePickupSessionTimeSeconds
+        entrySpeedMetersPerSecond = evidence.entrySpeedMetersPerSecond
+        minimumSpeedMetersPerSecond = evidence.minimumSpeedMetersPerSecond
+        exitSpeedMetersPerSecond = evidence.exitSpeedMetersPerSecond
+        speedRecoveryMetersPerSecond = evidence.speedRecoveryMetersPerSecond
+        peakLateralCentripetalG = evidence.peakLateralCentripetalG
+        entryGear = evidence.entryGear
+        minimumSpeedGear = evidence.minimumSpeedGear
+        exitGear = evidence.exitGear
+        entryBrake = evidence.entryBrake
+        exitThrottle = evidence.exitThrottle
+        throttlePickupDelaySeconds = evidence.throttlePickupDelaySeconds
+        exitAccelerationEstimateMetersPerSecondSquared = evidence.exitAccelerationEstimateMetersPerSecondSquared
+        isPossibleCorner = evidence.isPossibleCorner
+        evidenceConfidence = evidence.evidenceConfidence
+        domainTags = CornerEvidenceDomainTagsReport(evidence.domainTags)
+        dataWarnings = evidence.dataWarnings
+    }
+}
+
 struct QueryOptions {
     let lap: Int?
     let range: ClosedRange<TimeInterval>?
@@ -211,9 +290,14 @@ do {
         events: events,
         sampleRate: inspection.header.sampleRate
     )
+    let cornerEvidence = CornerEvidenceExtractor().extract(
+        packets: packets,
+        windows: cornerWindows,
+        sampleRate: inspection.header.sampleRate
+    )
     let filteredEvents = filter(events, with: options)
     let report = EventReport(
-        schemaVersion: "1.1",
+        schemaVersion: "1.2",
         generatedAt: Date(),
         sourceFile: inspection.fileURL.lastPathComponent,
         session: SessionReport(
@@ -244,7 +328,8 @@ do {
         ),
         query: queryReport(for: options),
         events: filteredEvents.map(EventReportItem.init),
-        cornerPerformanceWindows: cornerWindows.map(CornerPerformanceReport.init)
+        cornerPerformanceWindows: cornerWindows.map(CornerPerformanceReport.init),
+        cornerEvidence: cornerEvidence.map(CornerEvidenceReport.init)
     )
 
     let encoder = JSONEncoder()
@@ -470,6 +555,23 @@ private func makeTextReport(from report: EventReport) -> String {
         lines.append("  exit session time: \(formatTime(window.exitSessionTimeSeconds))")
         lines.append("  exit speed / gear / throttle: \(window.exitSpeedMetersPerSecond) m/s, gear \(window.exitGear), throttle \(window.exitThrottle)")
         lines.append("  speed recovery: \(window.speedRecoveryMetersPerSecond) m/s")
+        lines.append("")
+    }
+
+    lines.append("Corner evidence records: \(report.cornerEvidence.count)")
+    lines.append("")
+    for (index, evidence) in report.cornerEvidence.enumerated() {
+        lines.append("Corner evidence \(index + 1)")
+        lines.append("  corner index: \(evidence.cornerIndex)")
+        lines.append("  lap: \(evidence.lapNumber)")
+        lines.append("  confidence: \(evidence.evidenceConfidence)")
+        lines.append("  domain tags: ride=\(evidence.domainTags.rideControl), platform=\(evidence.domainTags.platformContact), grip=\(evidence.domainTags.gripUtilization), suspension=\(evidence.domainTags.suspensionBehavior), aero=\(evidence.domainTags.aeroInfluence)")
+        lines.append("  exit acceleration estimate: \(evidence.exitAccelerationEstimateMetersPerSecondSquared) m/s^2")
+        if evidence.dataWarnings.isEmpty {
+            lines.append("  warnings: none")
+        } else {
+            lines.append("  warnings: \(evidence.dataWarnings.joined(separator: ", "))")
+        }
         lines.append("")
     }
 

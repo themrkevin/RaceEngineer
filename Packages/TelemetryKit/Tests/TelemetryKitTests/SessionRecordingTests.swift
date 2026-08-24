@@ -382,11 +382,11 @@ final class SessionRecordingTests: XCTestCase {
 
     func testCornerPerformanceAnalyzerBuildsWindowAroundBrakingAnchor() {
         let packets = [
-            makeMockPacket(sequence: 0, speed: 30, yawRate: 0, brake: 0, steeringAngle: 0.2),
-            makeMockPacket(sequence: 1, speed: 29, yawRate: 0.2, brake: 1, steeringAngle: 0.3),
-            makeMockPacket(sequence: 2, speed: 10, yawRate: 0.4, brake: 1, steeringAngle: 0.4),
-            makeMockPacket(sequence: 3, speed: 12, yawRate: 0.3, brake: 0, throttle: 0.5, steeringAngle: 0.2),
-            makeMockPacket(sequence: 4, speed: 16, yawRate: 0.1, brake: 0, throttle: 0.8, steeringAngle: 0.1)
+            makeMockPacket(sequence: 0, speed: 30, yawRate: 0, brake: 0, throttle: 0, steeringAngle: 0.2, gear: 2),
+            makeMockPacket(sequence: 1, speed: 29, yawRate: 0.2, brake: 1, throttle: 0, steeringAngle: 0.3, gear: 1),
+            makeMockPacket(sequence: 2, speed: 10, yawRate: 0.4, brake: 1, throttle: 0, steeringAngle: 0.4, gear: 1),
+            makeMockPacket(sequence: 3, speed: 12, yawRate: 0.3, brake: 0, throttle: 0.5, steeringAngle: 0.2, gear: 1),
+            makeMockPacket(sequence: 4, speed: 16, yawRate: 0.1, brake: 0, throttle: 0.8, steeringAngle: 0.1, gear: 2)
         ]
 
         let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 10)
@@ -406,10 +406,90 @@ final class SessionRecordingTests: XCTestCase {
         XCTAssertEqual(windows[0].speedRecoveryMetersPerSecond, 2, accuracy: 0.001)
     }
 
+    func testCornerEvidenceExtractorProducesDeterministicEvidenceFromWindow() {
+        let packets = [
+            makeMockPacket(sequence: 0, speed: 30, yawRate: 0, brake: 0, throttle: 0, steeringAngle: 0.2, gear: 2),
+            makeMockPacket(sequence: 1, speed: 29, yawRate: 0.2, brake: 1, throttle: 0, steeringAngle: 0.3, gear: 1),
+            makeMockPacket(sequence: 2, speed: 10, yawRate: 0.4, brake: 1, throttle: 0, steeringAngle: 0.4, gear: 1),
+            makeMockPacket(sequence: 3, speed: 12, yawRate: 0.3, brake: 0, throttle: 0.5, steeringAngle: 0.2, gear: 1),
+            makeMockPacket(sequence: 4, speed: 16, yawRate: 0.1, brake: 0, throttle: 0.8, steeringAngle: 0.1, gear: 2)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 10)
+        let windows = CornerPerformanceAnalyzer().analyze(
+            packets: packets,
+            events: events,
+            sampleRate: 10
+        )
+        let evidence = CornerEvidenceExtractor().extract(
+            packets: packets,
+            windows: windows,
+            sampleRate: 10
+        )
+
+        XCTAssertEqual(windows.count, 1)
+        XCTAssertEqual(evidence.count, 1)
+
+        let item = evidence[0]
+        XCTAssertEqual(item.cornerIndex, 0)
+        XCTAssertEqual(item.lapNumber, 0)
+        XCTAssertEqual(item.entryGear, 2)
+        XCTAssertEqual(item.minimumSpeedGear, 1)
+        XCTAssertEqual(item.exitGear, 1)
+        XCTAssertEqual(item.entryLapTimeSeconds, nil)
+        XCTAssertEqual(item.minimumSpeedLapTimeSeconds, nil)
+        XCTAssertEqual(item.exitLapTimeSeconds, nil)
+        XCTAssertEqual(item.throttlePickupDelaySeconds ?? -1, 0.1, accuracy: 0.0001)
+        XCTAssertEqual(item.exitAccelerationEstimateMetersPerSecondSquared, 20, accuracy: 0.001)
+        XCTAssertEqual(item.domainTags.gripUtilization, .ready)
+        XCTAssertEqual(item.domainTags.rideControl, .caution)
+        XCTAssertEqual(item.domainTags.platformContact, .caution)
+        XCTAssertEqual(item.domainTags.suspensionBehavior, .caution)
+        XCTAssertEqual(item.domainTags.aeroInfluence, .unavailable)
+        XCTAssertTrue(item.dataWarnings.contains("domainSignalsUnavailable:aeroHighSpeedContext"))
+        XCTAssertTrue(item.evidenceConfidence >= 0 && item.evidenceConfidence <= 1)
+    }
+
+    func testCornerEvidenceExtractorNSXBaselineFieldPresenceAndDeterministicCount() throws {
+        let report = try loadNSXBaselineReport()
+        let baselineWindows = try baselineCornerWindows(from: report)
+        let evidence = CornerEvidenceExtractor().extract(
+            packets: [],
+            windows: baselineWindows,
+            sampleRate: 60
+        )
+
+        XCTAssertEqual(baselineWindows.count, 22)
+        XCTAssertEqual(evidence.count, 22)
+        XCTAssertEqual(evidence.count, baselineWindows.count)
+
+        for (index, item) in evidence.enumerated() {
+            XCTAssertEqual(item.cornerIndex, index)
+            XCTAssertTrue(item.entrySpeedMetersPerSecond.isFinite)
+            XCTAssertTrue(item.minimumSpeedMetersPerSecond.isFinite)
+            XCTAssertTrue(item.exitSpeedMetersPerSecond.isFinite)
+            XCTAssertTrue(item.speedRecoveryMetersPerSecond.isFinite)
+            XCTAssertTrue(item.peakLateralCentripetalG.isFinite)
+            XCTAssertTrue(item.evidenceConfidence >= 0)
+            XCTAssertTrue(item.evidenceConfidence <= 1)
+            XCTAssertEqual(item.anchorSessionTimeSeconds.isFinite, true)
+            XCTAssertEqual(item.entrySessionTimeSeconds.isFinite, true)
+            XCTAssertEqual(item.minimumSpeedSessionTimeSeconds.isFinite, true)
+            XCTAssertEqual(item.exitSessionTimeSeconds.isFinite, true)
+            XCTAssertEqual(item.domainTags.gripUtilization, .ready)
+            XCTAssertEqual(item.domainTags.rideControl, .unavailable)
+            XCTAssertEqual(item.domainTags.platformContact, .unavailable)
+            XCTAssertEqual(item.domainTags.suspensionBehavior, .unavailable)
+            XCTAssertEqual(item.domainTags.aeroInfluence, .unavailable)
+            XCTAssertTrue(item.dataWarnings.contains("domainSignalsUnavailable:rideAndSuspension"))
+            XCTAssertTrue(item.dataWarnings.contains("domainSignalsUnavailable:aeroPacketSlice"))
+        }
+    }
+
     func testNSXBaselineReportFreezesTicketZeroInvariants() throws {
         let report = try loadNSXBaselineReport()
 
-        XCTAssertEqual(report["schemaVersion"] as? String, "1.1")
+        XCTAssertEqual(report["schemaVersion"] as? String, "1.2")
 
         let events = try XCTUnwrap(report["events"] as? [[String: Any]])
         XCTAssertEqual(events.count, 27)
@@ -506,6 +586,104 @@ final class SessionRecordingTests: XCTestCase {
         return try XCTUnwrap(object as? [String: Any])
     }
 
+    private func baselineCornerWindows(from report: [String: Any]) throws -> [CornerPerformanceWindow] {
+        let cornerObjects = try XCTUnwrap(report["cornerPerformanceWindows"] as? [[String: Any]])
+
+        return try cornerObjects.enumerated().map { index, object in
+            let lapNumber = try intValue(object["lapNumber"], key: "lapNumber", index: index)
+            let anchorLapTime = doubleValue(object["anchorLapTimeSeconds"])
+            let anchorSessionTime = try doubleValue(object["anchorSessionTimeSeconds"], key: "anchorSessionTimeSeconds", index: index)
+            let entryTime = try doubleValue(object["entrySessionTimeSeconds"], key: "entrySessionTimeSeconds", index: index)
+            let minimumTime = try doubleValue(object["minimumSpeedSessionTimeSeconds"], key: "minimumSpeedSessionTimeSeconds", index: index)
+            let exitTime = try doubleValue(object["exitSessionTimeSeconds"], key: "exitSessionTimeSeconds", index: index)
+            let throttlePickupTime = doubleValue(object["throttlePickupSessionTimeSeconds"])
+
+            let event = TelemetryEvent(
+                kinds: [.hardBraking],
+                startTime: anchorSessionTime,
+                peakTime: anchorSessionTime,
+                endTime: anchorSessionTime,
+                sessionTime: anchorSessionTime,
+                lapTime: anchorLapTime,
+                lapNumber: lapNumber,
+                peakSpeedMetersPerSecond: floatValue(object["entrySpeedMetersPerSecond"]) ?? 0,
+                peakYawRateRadiansPerSecond: 0,
+                peakLateralCentripetalG: floatValue(object["peakLateralCentripetalG"]) ?? 0,
+                peakWheelSpeedSpreadRatio: 0,
+                gearBefore: intValue(object["entryGear"]) ?? 0,
+                gearAtPeak: intValue(object["minimumSpeedGear"]) ?? 0,
+                throttleAtPeak: floatValue(object["exitThrottle"]) ?? 0,
+                brakeAtPeak: floatValue(object["entryBrake"]) ?? 0,
+                speedBeforeMetersPerSecond: floatValue(object["entrySpeedMetersPerSecond"]) ?? 0,
+                speedAfterMetersPerSecond: floatValue(object["exitSpeedMetersPerSecond"]) ?? 0,
+                confidence: 1
+            )
+
+            return CornerPerformanceWindow(
+                anchorEvent: event,
+                entryTime: entryTime,
+                entrySpeedMetersPerSecond: try floatValue(object["entrySpeedMetersPerSecond"], key: "entrySpeedMetersPerSecond", index: index),
+                entryGear: try intValue(object["entryGear"], key: "entryGear", index: index),
+                entryBrake: try floatValue(object["entryBrake"], key: "entryBrake", index: index),
+                minimumSpeedTime: minimumTime,
+                minimumSpeedMetersPerSecond: try floatValue(object["minimumSpeedMetersPerSecond"], key: "minimumSpeedMetersPerSecond", index: index),
+                minimumSpeedGear: try intValue(object["minimumSpeedGear"], key: "minimumSpeedGear", index: index),
+                peakLateralCentripetalG: try floatValue(object["peakLateralCentripetalG"], key: "peakLateralCentripetalG", index: index),
+                throttlePickupTime: throttlePickupTime,
+                exitTime: exitTime,
+                exitSpeedMetersPerSecond: try floatValue(object["exitSpeedMetersPerSecond"], key: "exitSpeedMetersPerSecond", index: index),
+                exitGear: try intValue(object["exitGear"], key: "exitGear", index: index),
+                exitThrottle: try floatValue(object["exitThrottle"], key: "exitThrottle", index: index),
+                speedRecoveryMetersPerSecond: try floatValue(object["speedRecoveryMetersPerSecond"], key: "speedRecoveryMetersPerSecond", index: index),
+                isPossibleCorner: (object["isPossibleCorner"] as? Bool) ?? false
+            )
+        }
+    }
+
+    private func doubleValue(_ value: Any?, key: String, index: Int) throws -> Double {
+        if let value = value as? Double { return value }
+        if let value = value as? NSNumber { return value.doubleValue }
+        throw NSError(
+            domain: "TelemetryKitTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Missing or invalid \(key) at corner index \(index)"]
+        )
+    }
+
+    private func floatValue(_ value: Any?, key: String, index: Int) throws -> Float {
+        if let value = value as? Float { return value }
+        if let value = value as? Double { return Float(value) }
+        if let value = value as? NSNumber { return value.floatValue }
+        throw NSError(
+            domain: "TelemetryKitTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Missing or invalid \(key) at corner index \(index)"]
+        )
+    }
+
+    private func floatValue(_ value: Any?) -> Float? {
+        if let value = value as? Float { return value }
+        if let value = value as? Double { return Float(value) }
+        if let value = value as? NSNumber { return value.floatValue }
+        return nil
+    }
+
+    private func intValue(_ value: Any?, key: String, index: Int) throws -> Int {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        throw NSError(
+            domain: "TelemetryKitTests",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Missing or invalid \(key) at corner index \(index)"]
+        )
+    }
+
+    private func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        return nil
+    }
+
     private func doubleValue(_ value: Any?) -> Double? {
         if let value = value as? Double { return value }
         if let value = value as? NSNumber { return value.doubleValue }
@@ -519,7 +697,8 @@ final class SessionRecordingTests: XCTestCase {
         brake: Float,
         lap: Int16 = 0,
         throttle: Float = 0,
-        steeringAngle: Float = 0
+        steeringAngle: Float = 0,
+        gear: Int = 0
     ) -> GT7Packet {
         var data = Data(count: 368)
         var magic: UInt32 = 0x47375330
@@ -540,6 +719,7 @@ final class SessionRecordingTests: XCTestCase {
         data.replaceSubrange(0x4C..<0x50, with: Data(bytes: &carSpeed, count: 4))
         data.replaceSubrange(0x70..<0x74, with: Data(bytes: &packetSequence, count: 4))
         data.replaceSubrange(0x74..<0x76, with: Data(bytes: &currentLap, count: 2))
+        data[0x90] = UInt8(gear & 0x0F)
         data[0x91] = UInt8((throttle * 255).rounded())
         data[0x92] = UInt8((brake * 255).rounded())
         data.replaceSubrange(0x12C..<0x130, with: Data(bytes: &steering, count: 4))
