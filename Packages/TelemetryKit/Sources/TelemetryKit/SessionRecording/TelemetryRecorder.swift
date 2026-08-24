@@ -17,6 +17,7 @@ public actor TelemetryRecorder {
     private var skippedPausedFrameCount: UInt64 = 0
     private var loggedDisabledFrame = false
     private var loggedPausedFrame = false
+    private var loggedTelemetryGap = false
     
     private var lastPacketTimestamp = ContinuousClock.now
     private var processingTask: Task<Void, Never>?
@@ -211,6 +212,7 @@ public actor TelemetryRecorder {
         }
 
         self.lastPacketTimestamp = ContinuousClock.now
+        self.loggedTelemetryGap = false
 
         if isGamePaused {
             skippedPausedFrameCount += 1
@@ -242,13 +244,15 @@ public actor TelemetryRecorder {
         }
     }
 
+    // Diagnostic only: never mutates recording state. Real disconnects are handled via transport
+    // (NWListener) state in GT7TelemetryProvider, not by guessing from packet timing.
     private func watchdogMonitorLoop() async {
         let clock = ContinuousClock()
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(1))
-            if self.isRecording && (clock.now - self.lastPacketTimestamp) > .seconds(3.5) {
-                self.logger.info("🏁 Packet stream ended. Auto-sealing file.")
-                self.performStopRecording()
+            if self.isRecording && !self.loggedTelemetryGap && (clock.now - self.lastPacketTimestamp) > .seconds(3.5) {
+                self.loggedTelemetryGap = true
+                self.logger.warning("⚠️ Telemetry gap detected: no packets for >3.5s, recording continues")
             }
         }
     }
@@ -270,6 +274,7 @@ public actor TelemetryRecorder {
         self.skippedPausedFrameCount = 0
         self.loggedDisabledFrame = false
         self.loggedPausedFrame = false
+        self.loggedTelemetryGap = false
         ingressDroppedFrameCount.withLock { count in
             count = 0
         }

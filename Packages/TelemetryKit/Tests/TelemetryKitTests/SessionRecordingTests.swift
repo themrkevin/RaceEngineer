@@ -231,6 +231,29 @@ final class SessionRecordingTests: XCTestCase {
         XCTAssertEqual(deserialized?.sampleRate, 60)
     }
 
+    /// Regression test: a transient delivery gap must never force-stop an in-progress recording.
+    func testTelemetryGapDoesNotStopRecording() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("gap_test.race")
+        let recorder = TelemetryRecorder()
+
+        try await recorder.startRecording(to: fileURL)
+        await recorder.recordFrame(makeMockFrame(rpm: 5000.0))
+
+        // Exceed the watchdog's 3.5s staleness threshold with no frames arriving.
+        try await Task.sleep(for: .seconds(4))
+
+        let stateDuringGap = await recorder.currentRecordingState()
+        XCTAssertTrue(stateDuringGap.isRecording, "A frame delivery gap must not stop recording")
+
+        // Recording resumes normally after the gap and is still writing to the same file.
+        await recorder.recordFrame(makeMockFrame(rpm: 5200.0))
+        await recorder.stopRecording()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+        let fileSize = try XCTUnwrap(attributes[.size] as? Int64)
+        XCTAssertEqual(fileSize, Int64(RaceFileHeader.headerSize + (2 * 368)), "Both frames straddling the gap should be persisted")
+    }
+
     func testRecordedSessionSummaryMetadata() async throws {
         let fileURL = tempDirectory.appendingPathComponent("summary_test.race")
         let recorder = TelemetryRecorder()
