@@ -56,6 +56,10 @@ final class GT7PacketTests: XCTestCase {
         let bestLapMs: Int32 = 82450
         withUnsafeBytes(of: bestLapMs.littleEndian) { buffer.replaceSubrange(0x78..<0x7C, with: $0) }
 
+        // Session time progression = 12.345 seconds
+        let sessionTimeMs: Int32 = 12345
+        withUnsafeBytes(of: sessionTimeMs.littleEndian) { buffer.replaceSubrange(0x80..<0x84, with: $0) }
+
         // Position = 2, candidate session flags = 0x01 (car on track)
         let racePos: Int16 = 2
         withUnsafeBytes(of: racePos.littleEndian) { buffer.replaceSubrange(0x8C..<0x8E, with: $0) }
@@ -84,6 +88,7 @@ final class GT7PacketTests: XCTestCase {
         XCTAssertEqual(packet.currentLapNumber, 3)
         XCTAssertEqual(packet.totalLaps, 10)
         XCTAssertEqual(try XCTUnwrap(packet.bestLapTime), 82.45, accuracy: 0.001)
+        XCTAssertEqual(packet.sessionTimeMilliseconds, 12345)
         XCTAssertEqual(packet.racePosition, 2)
         XCTAssertEqual(packet.rawSessionFlags, 0x01)
         XCTAssertTrue(packet.isCarOnTrack)

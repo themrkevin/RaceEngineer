@@ -99,6 +99,7 @@ public struct MockPacket: TelemetryPacket, Sendable {
     // 5. Timing & Session
     public var bestLapTime: TimeInterval? = 82.5
     public var lastLapTime: TimeInterval? = 84.2
+    public var sessionTimeMilliseconds: Int64? = 0
     public var currentLapNumber: Int = 5
     public var racePosition: Int = 2
     public var totalCars: Int = 20

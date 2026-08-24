@@ -51,6 +51,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
     public let totalLaps: Int
     public let bestLapTime: TimeInterval?
     public let lastLapTime: TimeInterval?
+    public let sessionTimeMilliseconds: Int64?
     public let racePosition: Int
     public let totalCars: Int
     public let currentLapTime: TimeInterval?
@@ -113,6 +114,7 @@ public struct GT7Packet: TelemetryPacket, Sendable {
             self.totalLaps = 0
             self.bestLapTime = nil
             self.lastLapTime = nil
+            self.sessionTimeMilliseconds = nil
             self.racePosition = 0
             self.totalCars = 0
             self.currentLapTime = nil
@@ -217,6 +219,9 @@ public struct GT7Packet: TelemetryPacket, Sendable {
 
         let lastMillis = data.readInt32(at: GT7PacketMapping.Session.lastLapTime)
         self.lastLapTime = (lastMillis > 0 && lastMillis != -1) ? TimeInterval(lastMillis) / 1000.0 : nil
+
+        let sessionMillis = data.readInt32(at: GT7PacketMapping.Session.timeOfDayProgression)
+        self.sessionTimeMilliseconds = sessionMillis >= 0 ? Int64(sessionMillis) : nil
 
         self.racePosition = max(0, Int(data.readInt16(at: GT7PacketMapping.Session.racePosition)))
         // 0x8E is currently treated as session flags. The total-car offset is

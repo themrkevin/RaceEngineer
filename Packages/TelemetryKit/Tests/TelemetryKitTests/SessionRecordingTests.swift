@@ -301,6 +301,251 @@ final class SessionRecordingTests: XCTestCase {
         XCTAssertEqual(sessions.map(\.fileName), ["newer.RACE", "older.race"])
     }
 
+    func testTelemetryEventDetectorGroupsCandidateSamples() {
+        let packets = [
+            makeMockPacket(sequence: 0, speed: 30, yawRate: 0, brake: 0),
+            makeMockPacket(sequence: 1, speed: 28, yawRate: 0.4, brake: 1),
+            makeMockPacket(sequence: 2, speed: 25, yawRate: 0.8, brake: 1),
+            makeMockPacket(sequence: 3, speed: 24, yawRate: 2.0, brake: 0),
+            makeMockPacket(sequence: 4, speed: 24, yawRate: 2.0, brake: 0),
+            makeMockPacket(sequence: 5, speed: 24, yawRate: 0, brake: 0)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 60)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertTrue(events[0].kinds.contains(.hardBraking))
+        XCTAssertTrue(events[0].kinds.contains(.rapidRotation))
+        XCTAssertEqual(events[0].lapNumber, 0)
+    }
+
+    func testTelemetryEventDetectorDetectsFullStopAfterDisturbance() {
+        let packets = [
+            makeMockPacket(sequence: 0, speed: 20, yawRate: 0, brake: 0),
+            makeMockPacket(sequence: 1, speed: 0.5, yawRate: 1.8, brake: 0),
+            makeMockPacket(sequence: 2, speed: 0.2, yawRate: 1.7, brake: 0)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 60)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertTrue(events[0].kinds.contains(.fullStop))
+        XCTAssertTrue(events[0].kinds.contains(.rapidRotation))
+        XCTAssertTrue(events[0].kinds.contains(.vehicleDisturbance))
+    }
+
+    func testTelemetryEventDetectorPreservesSeparateDisturbanceEvents() {
+        let packets = [
+            makeMockPacket(sequence: 0, speed: 25, yawRate: 0, brake: 0),
+            makeMockPacket(sequence: 1, speed: 24, yawRate: 1.6, brake: 0),
+            makeMockPacket(sequence: 2, speed: 20, yawRate: 1.8, brake: 0),
+            makeMockPacket(sequence: 3, speed: 18, yawRate: 1.7, brake: 0),
+            makeMockPacket(sequence: 4, speed: 17, yawRate: 1.6, brake: 0),
+            makeMockPacket(sequence: 5, speed: 16, yawRate: 0, brake: 0)
+        ]
+
+        let configuration = TelemetryEventDetectorConfiguration(groupingInterval: 0.5)
+        let events = TelemetryEventDetector(configuration: configuration)
+            .detect(packets: packets, sampleRate: 1)
+
+        XCTAssertEqual(events.count, 5)
+        XCTAssertTrue(events.allSatisfy { $0.kinds.contains(.rapidRotation) })
+    }
+
+    func testTelemetryEventDetectorLeavesInitialPartialLapUntimed() {
+        let packets = [
+            makeMockPacket(sequence: 100, speed: 25, yawRate: 0, brake: 0, lap: 2),
+            makeMockPacket(sequence: 101, speed: 24, yawRate: 1.6, brake: 0, lap: 2)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 60)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].lapNumber, 2)
+        XCTAssertNil(events[0].lapTime)
+        XCTAssertEqual(events[0].sessionTime, 1.0 / 60.0, accuracy: 0.0001)
+    }
+
+    func testTelemetryEventDetectorTimesEventsFromObservedLapTransition() {
+        let packets = [
+            makeMockPacket(sequence: 100, speed: 25, yawRate: 0, brake: 0, lap: 2),
+            makeMockPacket(sequence: 101, speed: 24, yawRate: 0, brake: 0, lap: 3),
+            makeMockPacket(sequence: 102, speed: 23, yawRate: 1.6, brake: 0, lap: 3)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 60)
+
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].lapNumber, 3)
+        XCTAssertEqual(events[0].lapTime ?? -1, 1.0 / 60.0, accuracy: 0.0001)
+    }
+
+    func testCornerPerformanceAnalyzerBuildsWindowAroundBrakingAnchor() {
+        let packets = [
+            makeMockPacket(sequence: 0, speed: 30, yawRate: 0, brake: 0, steeringAngle: 0.2),
+            makeMockPacket(sequence: 1, speed: 29, yawRate: 0.2, brake: 1, steeringAngle: 0.3),
+            makeMockPacket(sequence: 2, speed: 10, yawRate: 0.4, brake: 1, steeringAngle: 0.4),
+            makeMockPacket(sequence: 3, speed: 12, yawRate: 0.3, brake: 0, throttle: 0.5, steeringAngle: 0.2),
+            makeMockPacket(sequence: 4, speed: 16, yawRate: 0.1, brake: 0, throttle: 0.8, steeringAngle: 0.1)
+        ]
+
+        let events = TelemetryEventDetector().detect(packets: packets, sampleRate: 10)
+        let windows = CornerPerformanceAnalyzer().analyze(
+            packets: packets,
+            events: events,
+            sampleRate: 10
+        )
+
+        XCTAssertEqual(windows.count, 1)
+        XCTAssertTrue(windows[0].isPossibleCorner)
+        XCTAssertEqual(windows[0].entryGear, packets[0].gear)
+        XCTAssertEqual(windows[0].minimumSpeedMetersPerSecond, 10, accuracy: 0.001)
+        XCTAssertEqual(windows[0].minimumSpeedGear, packets[2].gear)
+        XCTAssertEqual(windows[0].exitGear, packets[3].gear)
+        XCTAssertEqual(windows[0].exitThrottle, 0.5, accuracy: 0.01)
+        XCTAssertEqual(windows[0].speedRecoveryMetersPerSecond, 2, accuracy: 0.001)
+    }
+
+    func testNSXBaselineReportFreezesTicketZeroInvariants() throws {
+        let report = try loadNSXBaselineReport()
+
+        XCTAssertEqual(report["schemaVersion"] as? String, "1.1")
+
+        let events = try XCTUnwrap(report["events"] as? [[String: Any]])
+        XCTAssertEqual(events.count, 27)
+
+        let windows = try XCTUnwrap(report["cornerPerformanceWindows"] as? [[String: Any]])
+        XCTAssertEqual(windows.count, 22)
+        XCTAssertTrue(windows.allSatisfy { ($0["isPossibleCorner"] as? Bool) == true })
+    }
+
+    func testNSXBaselineCornerTimingUsesLapFirstWithSessionCompanion() throws {
+        let report = try loadNSXBaselineReport()
+        let windows = try XCTUnwrap(report["cornerPerformanceWindows"] as? [[String: Any]])
+        XCTAssertFalse(windows.isEmpty)
+
+        var observedThrottlePickup = false
+
+        for (index, window) in windows.enumerated() {
+            let debug = "window index \(index)"
+
+            XCTAssertNotNil(window["anchorSessionTimeSeconds"], "Missing anchorSessionTimeSeconds for \(debug)")
+            XCTAssertNotNil(window["entrySessionTimeSeconds"], "Missing entrySessionTimeSeconds for \(debug)")
+            XCTAssertNotNil(window["minimumSpeedSessionTimeSeconds"], "Missing minimumSpeedSessionTimeSeconds for \(debug)")
+            XCTAssertNotNil(window["exitSessionTimeSeconds"], "Missing exitSessionTimeSeconds for \(debug)")
+
+            let anchorLapTime = doubleValue(window["anchorLapTimeSeconds"])
+            let anchorSessionTime = try XCTUnwrap(doubleValue(window["anchorSessionTimeSeconds"]), "Missing anchorSessionTimeSeconds for \(debug)")
+
+            let entrySessionTime = try XCTUnwrap(doubleValue(window["entrySessionTimeSeconds"]), "Missing entrySessionTimeSeconds for \(debug)")
+            let minimumSessionTime = try XCTUnwrap(doubleValue(window["minimumSpeedSessionTimeSeconds"]), "Missing minimumSpeedSessionTimeSeconds for \(debug)")
+            let exitSessionTime = try XCTUnwrap(doubleValue(window["exitSessionTimeSeconds"]), "Missing exitSessionTimeSeconds for \(debug)")
+
+            if let anchorLapTime {
+                let entryLapTime = try XCTUnwrap(doubleValue(window["entryLapTimeSeconds"]), "Missing entryLapTimeSeconds for \(debug)")
+                let minimumLapTime = try XCTUnwrap(doubleValue(window["minimumSpeedLapTimeSeconds"]), "Missing minimumSpeedLapTimeSeconds for \(debug)")
+                let exitLapTime = try XCTUnwrap(doubleValue(window["exitLapTimeSeconds"]), "Missing exitLapTimeSeconds for \(debug)")
+
+                XCTAssertEqual(
+                    entryLapTime - anchorLapTime,
+                    entrySessionTime - anchorSessionTime,
+                    accuracy: 0.0001,
+                    "Entry lap/session delta mismatch for \(debug)"
+                )
+                XCTAssertEqual(
+                    minimumLapTime - anchorLapTime,
+                    minimumSessionTime - anchorSessionTime,
+                    accuracy: 0.0001,
+                    "Minimum-speed lap/session delta mismatch for \(debug)"
+                )
+                XCTAssertEqual(
+                    exitLapTime - anchorLapTime,
+                    exitSessionTime - anchorSessionTime,
+                    accuracy: 0.0001,
+                    "Exit lap/session delta mismatch for \(debug)"
+                )
+            }
+
+            if let throttleLapTime = doubleValue(window["throttlePickupLapTimeSeconds"]) {
+                observedThrottlePickup = true
+                let throttleSessionTime = try XCTUnwrap(doubleValue(window["throttlePickupSessionTimeSeconds"]), "Missing throttlePickupSessionTimeSeconds for \(debug)")
+                if let anchorLapTime {
+                    XCTAssertEqual(
+                        throttleLapTime - anchorLapTime,
+                        throttleSessionTime - anchorSessionTime,
+                        accuracy: 0.0001,
+                        "Throttle-pickup lap/session delta mismatch for \(debug)"
+                    )
+                }
+            }
+        }
+
+        XCTAssertTrue(observedThrottlePickup, "Expected at least one baseline window with throttle-pickup timing")
+    }
+
+    private func loadNSXBaselineReport() throws -> [String: Any] {
+        let thisFileURL = URL(fileURLWithPath: #filePath)
+        let packageRoot = thisFileURL
+            .deletingLastPathComponent() // TelemetryKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // TelemetryKit
+        let repoRoot = packageRoot
+            .deletingLastPathComponent() // Packages
+            .deletingLastPathComponent() // RaceEngineer
+
+        let reportURL = repoRoot
+            .appendingPathComponent("docs")
+            .appendingPathComponent("plan")
+            .appendingPathComponent("reference")
+            .appendingPathComponent("nsx-race-sample")
+            .appendingPathComponent("nsx-events.json")
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: reportURL.path), "Missing baseline report at \(reportURL.path)")
+        let data = try Data(contentsOf: reportURL)
+        let object = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(object as? [String: Any])
+    }
+
+    private func doubleValue(_ value: Any?) -> Double? {
+        if let value = value as? Double { return value }
+        if let value = value as? NSNumber { return value.doubleValue }
+        return nil
+    }
+
+    private func makeMockPacket(
+        sequence: Int32,
+        speed: Float,
+        yawRate: Float,
+        brake: Float,
+        lap: Int16 = 0,
+        throttle: Float = 0,
+        steeringAngle: Float = 0
+    ) -> GT7Packet {
+        var data = Data(count: 368)
+        var magic: UInt32 = 0x47375330
+        var packetSequence = sequence
+        var velocity = SIMD3<Float>(speed, 0, 0)
+        var angularVelocity = SIMD3<Float>(0, yawRate, 0)
+        var carSpeed = speed
+        var currentLap = lap
+        var steering = steeringAngle
+
+        data.replaceSubrange(0..<4, with: Data(bytes: &magic, count: 4))
+        data.replaceSubrange(0x10..<0x14, with: Data(bytes: &velocity.x, count: 4))
+        data.replaceSubrange(0x14..<0x18, with: Data(bytes: &velocity.y, count: 4))
+        data.replaceSubrange(0x18..<0x1C, with: Data(bytes: &velocity.z, count: 4))
+        data.replaceSubrange(0x2C..<0x30, with: Data(bytes: &angularVelocity.x, count: 4))
+        data.replaceSubrange(0x30..<0x34, with: Data(bytes: &angularVelocity.y, count: 4))
+        data.replaceSubrange(0x34..<0x38, with: Data(bytes: &angularVelocity.z, count: 4))
+        data.replaceSubrange(0x4C..<0x50, with: Data(bytes: &carSpeed, count: 4))
+        data.replaceSubrange(0x70..<0x74, with: Data(bytes: &packetSequence, count: 4))
+        data.replaceSubrange(0x74..<0x76, with: Data(bytes: &currentLap, count: 2))
+        data[0x91] = UInt8((throttle * 255).rounded())
+        data[0x92] = UInt8((brake * 255).rounded())
+        data.replaceSubrange(0x12C..<0x130, with: Data(bytes: &steering, count: 4))
+        return GT7Packet(decryptedData: data)
+    }
+
     func testRecordedSessionLibraryRejectsMissingDirectory() async throws {
         let missingURL = tempDirectory.appendingPathComponent("missing")
         let library = RecordedSessionLibrary(directoryURL: missingURL)
