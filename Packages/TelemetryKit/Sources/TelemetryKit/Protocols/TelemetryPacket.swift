@@ -75,6 +75,7 @@ public protocol TelemetryPacket: Sendable {
     // 5. Timing, Laps & Session Metadata (0x0A4 - 0x127)
     var bestLapTime: TimeInterval? { get }
     var lastLapTime: TimeInterval? { get }
+    var sessionTimeMilliseconds: Int64? { get }
     var currentLapNumber: Int { get }
     var racePosition: Int { get }
     var totalCars: Int { get }
